@@ -1,0 +1,332 @@
+name: 1cat-hermes-os
+
+x-hermes-common: &hermes-common
+  build:
+    context: .
+    dockerfile: infra/hermes/Dockerfile
+  image: 1cat/hermes-agent:0.20.0
+  user: "10000:10000"
+  entrypoint: ["/opt/hermes/.venv/bin/hermes"]
+  restart: unless-stopped
+  depends_on:
+    profile-init:
+      condition: service_completed_successfully
+    organization-mcp:
+      condition: service_started
+  volumes:
+    - hermes-data:/opt/data
+  networks:
+    - agent-control
+    - model-egress
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+  healthcheck:
+    test: ["CMD", "/opt/hermes/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+    interval: 10s
+    timeout: 5s
+    retries: 20
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-onecat}
+      POSTGRES_USER: ${POSTGRES_USER:-onecat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-onecat-local-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-onecat} -d ${POSTGRES_DB:-onecat}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+
+  minio-init:
+    image: alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    restart: "no"
+    volumes: ["minio-data:/data"]
+    command: ["sh", "-c", "chown -R 1000:1000 /data && chmod 700 /data"]
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    user: "1000:1000"
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-onecat}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-onecat-local-change-me}
+    volumes: ["minio-data:/data"]
+    networks: [data]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3@sha256:6a7217a100bd3e5de4063a27a538ef999a3c5a88c4b4ec0ffc0a642aee7b2597
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-bootstrap-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-onecat-local-change-me}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-onecat}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-onecat-local-change-me}
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: ${PUBLIC_BASE_URL:-http://localhost:8080}/auth
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      ORG_MCP_CLIENT_SECRET: ${ORG_MCP_CLIENT_SECRET}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD}
+    volumes:
+      - ./.runtime/keycloak/realm-1cat.json:/opt/keycloak/data/import/realm-1cat.json:ro
+    networks: [data, edge, service]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /auth/health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+
+  runtime-api:
+    build:
+      context: .
+      dockerfile: apps/runtime-api/Dockerfile
+    image: 1cat/runtime-api:0.1.0
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-onecat}:${POSTGRES_PASSWORD:-onecat-local-change-me}@postgres:5432/${POSTGRES_DB:-onecat}
+      AUTH_MODE: ${AUTH_MODE:-oidc}
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8080/auth/realms/1cat}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:-http://keycloak:8080/auth/realms/1cat/protocol/openid-connect/certs}
+      HERMES_EXECUTION_ENABLED: ${HERMES_EXECUTION_ENABLED:-false}
+      PII_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    networks: [data, service, edge]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  runtime-worker:
+    build:
+      context: .
+      dockerfile: apps/runtime-worker/Dockerfile
+    image: 1cat/runtime-worker:0.1.0
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-onecat}:${POSTGRES_PASSWORD:-onecat-local-change-me}@postgres:5432/${POSTGRES_DB:-onecat}
+      HERMES_EXECUTION_ENABLED: ${HERMES_EXECUTION_ENABLED:-false}
+      HERMES_PMA_URL: http://hermes-pma:8080
+      HERMES_BGA_URL: http://hermes-bga:8080
+      HERMES_MO_URL: http://hermes-mo:8080
+      HERMES_API_KEY_PMA: ${HERMES_API_KEY_PMA:-local-pma-change-me}
+      HERMES_API_KEY_BGA: ${HERMES_API_KEY_BGA:-local-bga-change-me}
+      HERMES_API_KEY_MO: ${HERMES_API_KEY_MO:-local-mo-change-me}
+      PROFILE_ROOT: /profiles
+    volumes:
+      - ./profiles:/profiles:ro
+    depends_on:
+      runtime-api:
+        condition: service_healthy
+    networks: [data, agent-control]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  organization-mcp:
+    build:
+      context: .
+      dockerfile: apps/organization-mcp/Dockerfile
+    image: 1cat/organization-mcp:0.1.0
+    restart: unless-stopped
+    environment:
+      RUNTIME_API_URL: http://runtime-api:8000
+      AUTH_MODE: ${AUTH_MODE:-oidc}
+      KEYCLOAK_TOKEN_URL: http://keycloak:8080/auth/realms/1cat/protocol/openid-connect/token
+      OIDC_CLIENT_ID: organization-mcp
+      OIDC_CLIENT_SECRET: ${ORG_MCP_CLIENT_SECRET}
+    depends_on:
+      runtime-api:
+        condition: service_healthy
+    networks: [service, agent-control]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  workspace:
+    build:
+      context: .
+      dockerfile: apps/workspace/Dockerfile
+    image: 1cat/workspace:0.1.0
+    restart: unless-stopped
+    networks: [edge]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  caddy:
+    build:
+      context: .
+      dockerfile: infra/caddy/Dockerfile
+    image: 1cat/caddy:2.10.2
+    restart: unless-stopped
+    environment:
+      XDG_CONFIG_HOME: /tmp/config
+      XDG_DATA_HOME: /tmp/data
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      runtime-api:
+        condition: service_healthy
+      workspace:
+        condition: service_started
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  profile-init:
+    image: alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    restart: "no"
+    volumes:
+      - hermes-data:/opt/data
+      - ./profiles:/bundles:ro
+      - ./scripts/init_profile_volume.sh:/init_profile_volume.sh:ro
+    command: ["sh", "/init_profile_volume.sh"]
+
+  hermes-auth:
+    profiles: ["auth"]
+    build:
+      context: .
+      dockerfile: infra/hermes/Dockerfile
+    image: 1cat/hermes-agent:0.20.0
+    user: "10000:10000"
+    entrypoint: ["/opt/hermes/.venv/bin/python"]
+    environment:
+      HERMES_HOME: /opt/data
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,organization-mcp
+    volumes:
+      - hermes-data:/opt/data
+      - ./scripts/codex_login.py:/scripts/codex_login.py:ro
+    command: ["/scripts/codex_login.py"]
+    networks: [model-egress]
+
+  hermes-pma:
+    <<: *hermes-common
+    profiles: ["agents"]
+    environment:
+      HERMES_HOME: /opt/data
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_PORT: 8080
+      API_SERVER_KEY: ${HERMES_API_KEY_PMA:-local-pma-change-me}
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,organization-mcp
+    command: ["-p", "pma", "gateway", "run", "--no-supervise", "--external-supervisor"]
+
+  hermes-bga:
+    <<: *hermes-common
+    profiles: ["agents"]
+    environment:
+      HERMES_HOME: /opt/data
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_PORT: 8080
+      API_SERVER_KEY: ${HERMES_API_KEY_BGA:-local-bga-change-me}
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,organization-mcp
+    command: ["-p", "bga", "gateway", "run", "--no-supervise", "--external-supervisor"]
+
+  hermes-mo:
+    <<: *hermes-common
+    profiles: ["agents"]
+    environment:
+      HERMES_HOME: /opt/data
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_PORT: 8080
+      API_SERVER_KEY: ${HERMES_API_KEY_MO:-local-mo-change-me}
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,organization-mcp
+    command: ["-p", "mo", "gateway", "run", "--no-supervise", "--external-supervisor"]
+
+  model-gateway:
+    profiles: ["api-key"]
+    build:
+      context: .
+      dockerfile: apps/model-gateway/Dockerfile
+    image: 1cat/model-gateway:0.1.0
+    environment:
+      MODEL_API_KEY_FILE: /run/secrets/model_api_key
+    secrets: [model_api_key]
+    networks: [agent-control, egress-uplink]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  egress-proxy:
+    build:
+      context: .
+      dockerfile: infra/egress-proxy/Dockerfile
+    image: 1cat/egress-proxy:0.1.0
+    restart: unless-stopped
+    networks: [model-egress, egress-uplink]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  data-helper:
+    profiles: ["maintenance"]
+    image: alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    volumes:
+      - hermes-data:/volumes/hermes
+      - minio-data:/volumes/minio
+    command: ["true"]
+
+secrets:
+  model_api_key:
+    file: ./.runtime/secrets/model_api_key
+
+volumes:
+  postgres-data:
+  minio-data:
+  hermes-data:
+
+networks:
+  edge:
+  service:
+    internal: true
+  data:
+    internal: true
+  agent-control:
+    internal: true
+  model-egress:
+    internal: true
+  egress-uplink:

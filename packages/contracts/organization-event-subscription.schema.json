@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/organization-event-subscription/1.0.0",
+  "title": "OrganizationEventSubscription",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "subscriber_role",
+    "delivery",
+    "correlation_id"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subscriber_role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "delivery": {
+      "enum": [
+        "pending",
+        "delivered",
+        "dead_letter",
+        "acknowledged"
+      ]
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "deduplication_key": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

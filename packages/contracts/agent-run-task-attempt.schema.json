@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/agent-run-task-attempt/1.0.0",
+  "title": "AgentRunTaskAttempt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "agent_run_id",
+    "attempt_id",
+    "commitment_id",
+    "role_id",
+    "profile_id",
+    "status",
+    "context_snapshot_id"
+  ],
+  "properties": {
+    "agent_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attempt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "commitment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "role_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hermes_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "accepted",
+        "running",
+        "result_received",
+        "validating",
+        "evidence_accepted",
+        "evidence_rejected",
+        "failed",
+        "cancelled",
+        "unknown"
+      ]
+    },
+    "context_snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retryability": {
+      "enum": [
+        "safe",
+        "unsafe",
+        "not_applicable"
+      ]
+    }
+  }
+}

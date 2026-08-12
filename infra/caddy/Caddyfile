@@ -1,0 +1,27 @@
+{
+  auto_https off
+  admin off
+}
+
+:8080 {
+  encode zstd gzip
+  handle /auth/* {
+    reverse_proxy keycloak:8080
+  }
+  handle /v1/* {
+    reverse_proxy runtime-api:8000
+  }
+  handle /health/* {
+    reverse_proxy runtime-api:8000
+  }
+  handle {
+    reverse_proxy workspace:8080
+  }
+  header {
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  }
+}
+

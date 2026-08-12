@@ -1,0 +1,66 @@
+{
+  "model": {
+    "default": "gpt-5.6-terra",
+    "provider": "openai-codex"
+  },
+  "gateway": {
+    "api_server": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8080
+    }
+  },
+  "skills": {
+    "auto_load": false
+  },
+  "approvals": {
+    "mode": "ask"
+  },
+  "agent": {
+    "max_turns": 24,
+    "disabled_toolsets": [
+      "web",
+      "browser",
+      "terminal",
+      "file",
+      "code_execution",
+      "vision",
+      "video",
+      "image_gen",
+      "video_gen",
+      "bfl",
+      "x_search",
+      "tts",
+      "skills",
+      "todo",
+      "memory",
+      "context_engine",
+      "session_search",
+      "clarify",
+      "delegation",
+      "cronjob",
+      "homeassistant",
+      "spotify",
+      "discord",
+      "discord_admin",
+      "yuanbao",
+      "computer_use"
+    ]
+  },
+  "platform_toolsets": {
+    "api_server": [
+      "organization-runtime"
+    ]
+  },
+  "mcp_servers": {
+    "organization-runtime": {
+      "url": "http://organization-mcp:8001/mcp",
+      "transport": "http",
+      "enabled": true,
+      "timeout": 20
+    }
+  },
+  "terminal": {
+    "backend": "docker"
+  }
+}

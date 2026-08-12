@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/digital-role-manifest/1.0.0",
+  "title": "DigitalRoleManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "role_id",
+    "profile_id",
+    "name",
+    "mission",
+    "owner_role",
+    "lifecycle",
+    "bundle_version"
+  ],
+  "properties": {
+    "role_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mission": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lifecycle": {
+      "enum": [
+        "defined",
+        "onboarding",
+        "shadow",
+        "active_limited",
+        "suspended",
+        "retraining",
+        "retired"
+      ]
+    },
+    "responsibilities": {
+      "type": "array"
+    },
+    "non_responsibilities": {
+      "type": "array"
+    },
+    "bundle_version": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

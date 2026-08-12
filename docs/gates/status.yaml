@@ -1,0 +1,46 @@
+release: R0
+software_status: software_verified_on_mac
+deployment_status: not_released
+gates:
+  G0:
+    status: pending_human_signoff
+  G1:
+    status: software_evidence_complete
+  G2_PMA:
+    status: software_evidence_complete
+  G2_BGA:
+    status: blocked_platform_source_assets
+  G2_MO:
+    status: software_evidence_complete
+  G3:
+    status: blocked_security_review_and_pending_real_shadow
+  G4:
+    status: pending_human_decision
+verified:
+  baseline_documents: 79
+  baseline_sha256: b1a6a716d9bdcc9cca9ab58dca4bf57279d7cb391a0122452887f850a7eef983
+  hermes_version: 0.20.0
+  hermes_commit: 3c27eb6234bf91b8ceee9e9071591b31e9b148cb
+  active_skills: 27
+  dormant_skills: 1
+  contracts: 10
+  unit_tests: 13
+  mac_business_smoke: passed_synthetic
+  workspace_playwright: passed
+  backup_restore_drill: passed_synthetic
+  arm64_images: 12
+  amd64_images: 12
+blockers:
+  - named_owner_and_dec_signoff
+  - bg_07_10_source_zip_ownership_and_sha256
+  - critical_high_vulnerability_reachability_and_remediation_review
+  - real_shadow
+  - business_owner_uat
+  - dec_08_threshold_approval
+  - g4_active_limited_decision
+constraints:
+  pii: disabled
+  publishing: manual_only
+  a2a: disabled
+  video_channel_skill: dormant
+  production_ha: out_of_scope

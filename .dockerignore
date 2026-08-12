@@ -1,0 +1,9 @@
+.git
+.runtime
+dist
+node_modules
+**/__pycache__
+**/.pytest_cache
+docs/baseline
+tests
+

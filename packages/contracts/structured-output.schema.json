@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/structured-output/1.0.0",
+  "title": "StructuredOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "object_type",
+    "candidate_status",
+    "payload",
+    "source_refs"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "object_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_status": {
+      "enum": [
+        "candidate",
+        "pass_candidate",
+        "submitted"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    },
+    "source_refs": {
+      "type": "array"
+    },
+    "unknowns": {
+      "type": "array"
+    },
+    "residual_risks": {
+      "type": "array"
+    }
+  }
+}

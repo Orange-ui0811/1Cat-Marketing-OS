@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/approval-grant/1.0.0",
+  "title": "ApprovalGrant",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "grant_id",
+    "subject",
+    "subject_version",
+    "subject_hash",
+    "action",
+    "scope",
+    "status",
+    "issued_by",
+    "remaining_uses"
+  ],
+  "properties": {
+    "grant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subject_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "subject_hash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope": {
+      "type": "object"
+    },
+    "status": {
+      "enum": [
+        "issued",
+        "active",
+        "consumed",
+        "revoked",
+        "expired",
+        "invalidated"
+      ]
+    },
+    "issued_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "remaining_uses": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

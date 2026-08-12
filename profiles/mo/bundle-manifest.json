@@ -1,0 +1,26 @@
+{
+  "role_id": "DROLE-03",
+  "profile_id": "mo",
+  "bundle_version": "0.1.0-r0",
+  "hermes_commit": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
+  "files": {
+    "DAILY_OPERATION.md": "3aaea81da364eb19eb0f5fad9fdcb5346e5dc2fec1e3de8cdc5993e4d556bee8",
+    "MEMORY.md": "bf7380d8e9d8b6662754ff7e2f2622a46e5c8dda60dd5bab60e6716f8eeffba2",
+    "MEMORY_POLICY.md": "89ffa97358ad0bc0a046d98e412a51b2a1dc3b5b41a9215f7d20d36039a27e32",
+    "ROLE_MANIFEST.md": "83ed7ed71670a90c54667d7865af6ed4f2a7085ac5f510a60724fdd92b8e66d8",
+    "SOUL.md": "96953e9223a3765b136c9a2a8921c19de6b55f40b77a3f3d3ecc719528a6438a",
+    "TOOL_ALLOWLIST.md": "c55cea2c4cf2346f126ab17010a541f75e9751e91c619a6f027d4bfdbc6cb069",
+    "config.yaml": "25053e6abb264ea161ca6b6efd26504a3fc8e631e3ad36e1e487abe87a53077d",
+    "skills/SKL-OR-01/SKILL.md": "6b584bdd20a23a9cf5f52495e2143c6ce6016628e0f8f9f3915fdf368accfb03",
+    "skills/SKL-OR-02/SKILL.md": "c976364dd50369c9a7a7d6deef7a4dfee5625d50169c8d5279307ead9ab16c0b",
+    "skills/SKL-OR-03/SKILL.md": "f37a95712dc743e82297b20e4932e6f1e17f73979c9c0159b19dfb4c247d518f",
+    "skills/SKL-OR-04/SKILL.md": "1204ea275b9954904ed869e4026bd507fe38a27465c8dc3875a5cb0a30ef1835",
+    "skills/SKL-OR-05/SKILL.md": "5255752cf9cb249c7d0b72a0e579766127df20e75d871e2ddea0e1efece2fb9b",
+    "skills/SKL-OR-06/SKILL.md": "8abd39c0be694ac9194c999b613114ec716df966e8fef9ce7bf844a916064d4c",
+    "skills/SKL-SH-01/SKILL.md": "f662fa2f9b00e9c48148f2a2853b1102d38704217f13674ab461ef9a614756ba",
+    "skills/SKL-SH-02/SKILL.md": "0f71ae3edd314ecea00627007c04a2b8c61d4425e0a330985baace13684adc1b",
+    "skills/SKL-SH-03/SKILL.md": "ed4fc507cb4a4d0781b819510622536f07ce62efba5d34d7269b707063e1da58",
+    "skills/SKL-SH-04/SKILL.md": "596b954d23b84473b4e0cd38668e26ffd22e6f486f3068a6c3f3f527534b605e",
+    "skills/SKL-SH-05/SKILL.md": "5b6e93595d856e220feab40b5a04b2405cd33a6c76663fbf857cbe2b47ceeb97"
+  }
+}

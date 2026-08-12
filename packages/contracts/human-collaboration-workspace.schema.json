@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/human-collaboration-workspace/1.0.0",
+  "title": "HumanCollaborationWorkspace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "workspace_id",
+    "actor_id",
+    "permissions",
+    "inbox",
+    "takeover_available"
+  ],
+  "properties": {
+    "workspace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "permissions": {
+      "type": "array"
+    },
+    "inbox": {
+      "type": "array"
+    },
+    "takeover_available": {
+      "const": true
+    },
+    "audit_export_available": {
+      "type": "boolean"
+    }
+  }
+}

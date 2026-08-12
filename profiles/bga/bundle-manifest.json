@@ -1,0 +1,30 @@
+{
+  "role_id": "DROLE-02",
+  "profile_id": "bga",
+  "bundle_version": "0.1.0-r0",
+  "hermes_commit": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
+  "files": {
+    "DAILY_OPERATION.md": "66ed4af01e0c00c1649a901676fcfceae07eff5ba2eace550d21cbaad7dc5997",
+    "MEMORY.md": "bf7380d8e9d8b6662754ff7e2f2622a46e5c8dda60dd5bab60e6716f8eeffba2",
+    "MEMORY_POLICY.md": "d85f176eaac30acc9e73d8af4668a36935e33271ab32984a5361afd2224b218a",
+    "ROLE_MANIFEST.md": "a4023dc79f6258837f09b92846d39987cb878d9797b8d04f83aaf820f7e944f9",
+    "SOUL.md": "2348d85acc2bb3fa249da658179ab7d231c3ce5d2b7b4d2de7443370f4b93d9f",
+    "TOOL_ALLOWLIST.md": "3c5c94b50c46ef4eee7e22921bb73b61e493cef35bde36b4752bafa06ebe2504",
+    "config.yaml": "25053e6abb264ea161ca6b6efd26504a3fc8e631e3ad36e1e487abe87a53077d",
+    "skills/SKL-BG-01/SKILL.md": "5105c3ce13d9b074e7c118da649c830846deac3b04a95a7b6487fa1c84e05277",
+    "skills/SKL-BG-02/SKILL.md": "c03c8e9bd4d165518df1ef9e8fa8cf5bcec5b4390eb1d04e95340562c3974a41",
+    "skills/SKL-BG-03/SKILL.md": "9fa5ca463af23be629de33e2a9d7c8f750f162e65b1a37bbcceba71fc98f2e5f",
+    "skills/SKL-BG-04/SKILL.md": "9bb3eba58894444df6681f866db3e0a4a11b796019db07d0fdc3dfcabc3f6e7c",
+    "skills/SKL-BG-05/SKILL.md": "8bd8d183ab6f701c4523a9e7d183e8a5c0d430a0eaa7e56e67803d869fb8322b",
+    "skills/SKL-BG-06/SKILL.md": "d539fab869b8e827acf022ea199d6ef9c0eb47e59551fe1011ce11462988f79b",
+    "skills/SKL-BG-07/SKILL.md": "14ea058adcd0a1caff3f298d83baca7d120b8c7cfa9d883f50a177f440aa39b7",
+    "skills/SKL-BG-08/SKILL.md": "794efcd97258087e1c3f28afd4bc964f945a0a52bc31b5d1b1ab9d821c14f82d",
+    "skills/SKL-BG-09/SKILL.md": "f5dd1f1ba86aa30578827bc691922b9fcd337dc81fd923f11ceb98027d5d58a2",
+    "skills/SKL-BG-10/SKILL.md": "9f0ed151e41c35e1e143d962ecc8bea6f45d069ecf7e9129e186d87756a8121c",
+    "skills/SKL-SH-01/SKILL.md": "f662fa2f9b00e9c48148f2a2853b1102d38704217f13674ab461ef9a614756ba",
+    "skills/SKL-SH-02/SKILL.md": "0f71ae3edd314ecea00627007c04a2b8c61d4425e0a330985baace13684adc1b",
+    "skills/SKL-SH-03/SKILL.md": "ed4fc507cb4a4d0781b819510622536f07ce62efba5d34d7269b707063e1da58",
+    "skills/SKL-SH-04/SKILL.md": "596b954d23b84473b4e0cd38668e26ffd22e6f486f3068a6c3f3f527534b605e",
+    "skills/SKL-SH-05/SKILL.md": "5b6e93595d856e220feab40b5a04b2405cd33a6c76663fbf857cbe2b47ceeb97"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/work-commitment/1.0.0",
+  "title": "WorkCommitment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "commitment_id",
+    "version",
+    "objective",
+    "proposed_role",
+    "status",
+    "acceptance"
+  ],
+  "properties": {
+    "commitment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "proposed_role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "committed_role": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "enum": [
+        "proposed",
+        "clarifying",
+        "accepted",
+        "active",
+        "waiting",
+        "submitted",
+        "fulfilled",
+        "rejected",
+        "manual_takeover",
+        "paused",
+        "cancelled"
+      ]
+    },
+    "acceptance": {
+      "type": "object"
+    },
+    "dependencies": {
+      "type": "array"
+    },
+    "state_history": {
+      "type": "array"
+    }
+  }
+}

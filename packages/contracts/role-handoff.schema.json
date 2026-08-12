@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://1cat.local/contracts/role-handoff/1.0.0",
+  "title": "RoleHandoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_id",
+    "commitment_id",
+    "sender_role",
+    "recipient",
+    "purpose",
+    "status",
+    "object_refs"
+  ],
+  "properties": {
+    "handoff_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "commitment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sender_role": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recipient": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "accepted",
+        "returned_for_revision",
+        "rejected_out_of_scope",
+        "dependency_missing",
+        "superseded"
+      ]
+    },
+    "object_refs": {
+      "type": "array"
+    },
+    "evidence_refs": {
+      "type": "array"
+    },
+    "residual_risks": {
+      "type": "array"
+    }
+  }
+}

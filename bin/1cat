@@ -1,0 +1,189 @@
+#!/bin/sh
+set -eu
+
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$PROJECT_DIR"
+
+compose() {
+  docker compose --env-file .env "$@"
+}
+
+require_env() {
+  if [ ! -f .env ]; then
+    echo "尚未初始化。请先运行 ./bin/1cat init"
+    exit 1
+  fi
+}
+
+random_secret() {
+  openssl rand -hex 24
+}
+
+set_env_value() {
+  key=$1
+  value=$2
+  tmp_file=".runtime/.env.tmp"
+  awk -F= -v k="$key" -v v="$value" 'BEGIN{done=0} $1==k{print k"="v;done=1;next}{print} END{if(!done)print k"="v}' .env > "$tmp_file"
+  mv "$tmp_file" .env
+  chmod 600 .env
+}
+
+cmd=${1:-help}
+shift || true
+
+case "$cmd" in
+  doctor)
+    echo "检查 1Cat Hermes OS 运行环境…"
+    command -v docker >/dev/null || { echo "缺少 Docker"; exit 1; }
+    docker info >/dev/null 2>&1 || { echo "Docker 尚未启动"; exit 1; }
+    docker compose version >/dev/null
+    docker buildx version >/dev/null
+    python3 scripts/verify_baseline.py
+    commit=$(cat vendor/hermes-agent/UPSTREAM_COMMIT)
+    [ "$commit" = "3c27eb6234bf91b8ceee9e9071591b31e9b148cb" ] || { echo "Hermes commit不匹配"; exit 1; }
+    echo "环境检查通过：Mac/Linux Docker Compose、基线和Hermes版本均可用。"
+    ;;
+  init)
+    mkdir -p .runtime/secrets .runtime/backups .runtime/keycloak
+    chmod 700 .runtime .runtime/secrets .runtime/backups .runtime/keycloak
+    if [ ! -f .env ]; then
+      cp .env.example .env
+      chmod 600 .env
+      set_env_value POSTGRES_PASSWORD "$(random_secret)"
+      set_env_value MINIO_ROOT_PASSWORD "$(random_secret)"
+      set_env_value KEYCLOAK_ADMIN_PASSWORD "$(random_secret)"
+      set_env_value INITIAL_ADMIN_PASSWORD "$(random_secret)"
+      set_env_value ORG_MCP_CLIENT_SECRET "$(random_secret)"
+      set_env_value HERMES_API_KEY_PMA "$(random_secret)"
+      set_env_value HERMES_API_KEY_BGA "$(random_secret)"
+      set_env_value HERMES_API_KEY_MO "$(random_secret)"
+    fi
+    if ! grep -q '^INITIAL_ADMIN_PASSWORD=..' .env; then
+      set_env_value INITIAL_ADMIN_PASSWORD "$(random_secret)"
+    fi
+    if ! grep -q '^ORG_MCP_CLIENT_SECRET=..' .env; then
+      set_env_value ORG_MCP_CLIENT_SECRET "$(random_secret)"
+    fi
+    initial_admin_password=$(sed -n 's/^INITIAL_ADMIN_PASSWORD=//p' .env)
+    org_mcp_client_secret=$(sed -n 's/^ORG_MCP_CLIENT_SECRET=//p' .env)
+    sed -e "s/__INITIAL_ADMIN_PASSWORD__/$initial_admin_password/g" \
+        -e "s/__ORG_MCP_CLIENT_SECRET__/$org_mcp_client_secret/g" \
+        infra/keycloak/realm-1cat.json > .runtime/keycloak/realm-1cat.json
+    chmod 600 .runtime/keycloak/realm-1cat.json
+    if [ ! -f .runtime/secrets/model_api_key ]; then
+      : > .runtime/secrets/model_api_key
+      chmod 600 .runtime/secrets/model_api_key
+    fi
+    python3 scripts/generate_contracts.py
+    python3 scripts/build_profiles.py
+    compose config --quiet
+    echo "初始化完成。Secret保存在项目的.env与.runtime目录，不会进入部署包。首次登录用户为admin，密码见.env中的INITIAL_ADMIN_PASSWORD。"
+    ;;
+  up)
+    require_env
+    if [ -f .release-bundle ]; then
+      compose --profile agents up -d
+    else
+      compose --profile agents up -d --build
+    fi
+    compose exec -T keycloak sh -eu -c '
+      /opt/keycloak/bin/kcadm.sh config credentials --server http://127.0.0.1:8080/auth --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
+      client_uuid=$(/opt/keycloak/bin/kcadm.sh get clients -r 1cat -q clientId=organization-mcp --fields id --format csv --noquotes | tail -1)
+      test -n "$client_uuid"
+      /opt/keycloak/bin/kcadm.sh update "clients/$client_uuid" -r 1cat -s "secret=$ORG_MCP_CLIENT_SECRET" >/dev/null
+      /opt/keycloak/bin/kcadm.sh set-password -r 1cat --username admin --new-password "$INITIAL_ADMIN_PASSWORD" >/dev/null
+    '
+    if compose run --rm --no-deps --entrypoint sh profile-init -c 'test -s /opt/data/auth.json' >/dev/null 2>&1; then
+      echo "三个Hermes Gateway已启用真实模型执行。"
+    else
+      echo "核心工作台和三个Hermes Gateway已启动；真实模型执行保持关闭。运行 ./bin/1cat auth codex 完成项目专用授权。"
+    fi
+    echo "工作台：http://localhost:8080"
+    ;;
+  down)
+    require_env
+    compose --profile agents --profile api-key down
+    ;;
+  status)
+    require_env
+    compose --profile agents ps
+    ;;
+  logs)
+    require_env
+    compose --profile agents logs -f --tail=200 "$@"
+    ;;
+  auth)
+    require_env
+    provider=${1:-}
+    [ "$provider" = "codex" ] || { echo "用法：./bin/1cat auth codex"; exit 1; }
+    compose up -d egress-proxy
+    if [ ! -f .release-bundle ]; then
+      compose --profile auth build hermes-auth
+    fi
+    compose --profile auth run --rm hermes-auth
+    set_env_value HERMES_EXECUTION_ENABLED true
+    echo "项目专用Codex授权完成。运行 ./bin/1cat restart-agents。"
+    ;;
+  restart-agents)
+    require_env
+    if [ -f .release-bundle ]; then
+      compose --profile agents up -d --force-recreate runtime-worker hermes-pma hermes-bga hermes-mo
+    else
+      compose --profile agents up -d --build --force-recreate runtime-worker hermes-pma hermes-bga hermes-mo
+    fi
+    ;;
+  smoke)
+    require_env
+    python3 scripts/smoke.py
+    ;;
+  test)
+    ./scripts/test.sh
+    ;;
+  e2e)
+    ./scripts/test-e2e.sh
+    ;;
+  backup)
+    require_env
+    stamp=$(date +%Y%m%d-%H%M%S)
+    destination=".runtime/backups/1cat-$stamp"
+    mkdir -p "$destination"
+    compose exec -T postgres pg_dump -U "${POSTGRES_USER:-onecat}" "${POSTGRES_DB:-onecat}" > "$destination/postgres.sql"
+    compose --profile maintenance run --rm --no-deps -T data-helper sh -c 'tar -czf - -C /volumes/hermes .' > "$destination/hermes-data.tar.gz"
+    compose --profile maintenance run --rm --no-deps -T data-helper sh -c 'tar -czf - -C /volumes/minio .' > "$destination/minio-data.tar.gz"
+    (cd "$destination" && shasum -a 256 postgres.sql hermes-data.tar.gz minio-data.tar.gz > SHA256SUMS)
+    chmod -R go-rwx "$destination"
+    echo "备份完成：$destination"
+    ;;
+  restore)
+    require_env
+    source_dir=${1:-}
+    confirm=${2:-}
+    [ -n "$source_dir" ] || { echo "用法：./bin/1cat restore <backup-directory> --confirm"; exit 2; }
+    [ "$confirm" = "--confirm" ] || { echo "恢复会覆盖当前运行数据。核对目录后追加 --confirm。"; exit 2; }
+    [ -d "$source_dir" ] || { echo "备份目录不存在：$source_dir"; exit 2; }
+    source_dir=$(CDPATH= cd -- "$source_dir" && pwd -P)
+    for required in postgres.sql hermes-data.tar.gz minio-data.tar.gz SHA256SUMS; do
+      [ -s "$source_dir/$required" ] || { echo "备份缺少文件：$required"; exit 2; }
+    done
+    (cd "$source_dir" && shasum -a 256 -c SHA256SUMS)
+    echo "已验证备份，正在停止写入服务并恢复：$source_dir"
+    compose --profile agents stop caddy workspace runtime-worker runtime-api organization-mcp keycloak minio hermes-pma hermes-bga hermes-mo 2>/dev/null || true
+    compose up -d postgres
+    compose exec -T postgres dropdb -U "${POSTGRES_USER:-onecat}" --if-exists --force "${POSTGRES_DB:-onecat}"
+    compose exec -T postgres createdb -U "${POSTGRES_USER:-onecat}" "${POSTGRES_DB:-onecat}"
+    compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-onecat}" "${POSTGRES_DB:-onecat}" < "$source_dir/postgres.sql"
+    compose --profile maintenance run --rm --no-deps -T data-helper sh -c 'find /volumes/hermes -mindepth 1 -delete; tar -xzf - -C /volumes/hermes; chown -R 10000:10000 /volumes/hermes' < "$source_dir/hermes-data.tar.gz"
+    compose --profile maintenance run --rm --no-deps -T data-helper sh -c 'find /volumes/minio -mindepth 1 -delete; tar -xzf - -C /volumes/minio; chown -R 1000:1000 /volumes/minio' < "$source_dir/minio-data.tar.gz"
+    ./bin/1cat up
+    ./bin/1cat smoke
+    echo "恢复完成并通过Smoke Test：$source_dir"
+    ;;
+  package)
+    require_env
+    platform=${1:-all}
+    ./scripts/package.sh "$platform"
+    ;;
+  help|*)
+    echo "用法：./bin/1cat {doctor|init|up|down|status|logs|auth codex|restart-agents|smoke|test|e2e|backup|restore <dir> --confirm|package arm64|package amd64|package all}"
+    ;;
+esac

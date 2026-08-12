@@ -1,0 +1,52 @@
+{
+  "digital-role-manifest": {
+    "version": "1.0.0",
+    "file": "digital-role-manifest.schema.json",
+    "status": "R0"
+  },
+  "organization-event-subscription": {
+    "version": "1.0.0",
+    "file": "organization-event-subscription.schema.json",
+    "status": "R0"
+  },
+  "work-commitment": {
+    "version": "1.0.0",
+    "file": "work-commitment.schema.json",
+    "status": "R0"
+  },
+  "role-handoff": {
+    "version": "1.0.0",
+    "file": "role-handoff.schema.json",
+    "status": "R0"
+  },
+  "context-snapshot": {
+    "version": "1.0.0",
+    "file": "context-snapshot.schema.json",
+    "status": "R0"
+  },
+  "tool-capability-policy": {
+    "version": "1.0.0",
+    "file": "tool-capability-policy.schema.json",
+    "status": "R0"
+  },
+  "approval-grant": {
+    "version": "1.0.0",
+    "file": "approval-grant.schema.json",
+    "status": "R0"
+  },
+  "agent-run-task-attempt": {
+    "version": "1.0.0",
+    "file": "agent-run-task-attempt.schema.json",
+    "status": "R0"
+  },
+  "structured-output": {
+    "version": "1.0.0",
+    "file": "structured-output.schema.json",
+    "status": "R0"
+  },
+  "human-collaboration-workspace": {
+    "version": "1.0.0",
+    "file": "human-collaboration-workspace.schema.json",
+    "status": "R0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "fixture": "synthetic-sales-feedback",
+  "synthetic": true,
+  "contains_real_pii": false,
+  "lead_stub": {
+    "source_record_ref": "synthetic://touchpoint/001",
+    "touchpoint": "douyin-comment"
+  },
+  "feedback": {
+    "inquiry_status": "needs_more_info",
+    "reason_code": "SYNTHETIC_MORE_INFO",
+    "registry_version": "r0-smoke"
+  }
+}

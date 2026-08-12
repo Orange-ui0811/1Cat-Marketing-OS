@@ -1,0 +1,40 @@
+{
+  "realm": "1cat",
+  "enabled": true,
+  "displayName": "1Cat Hermes OS",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": false,
+  "roles": {
+    "realm": [
+      {"name":"company_admin"}, {"name":"product_marketing_owner"},
+      {"name":"brand_growth_owner"}, {"name":"sales_owner"},
+      {"name":"privacy_owner"}, {"name":"operator"}, {"name":"auditor"},
+      {"name":"service"}
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "1cat-workspace", "name": "1Cat Workspace", "enabled": true,
+      "publicClient": true, "directAccessGrantsEnabled": true, "standardFlowEnabled": true,
+      "redirectUris": ["http://localhost:8080/*"], "webOrigins": ["http://localhost:8080"]
+    },
+    {
+      "clientId": "organization-mcp", "name": "Organization MCP", "enabled": true,
+      "publicClient": false, "secret": "__ORG_MCP_CLIENT_SECRET__", "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": false, "standardFlowEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "admin", "enabled": true, "email": "admin@1cat.local", "emailVerified": true,
+      "firstName": "一猫", "lastName": "管理员",
+      "credentials": [{"type":"password","value":"__INITIAL_ADMIN_PASSWORD__","temporary":false}],
+      "realmRoles": ["company_admin","operator","auditor","product_marketing_owner","brand_growth_owner","sales_owner","privacy_owner"]
+    },
+    {
+      "username": "service-account-organization-mcp", "enabled": true,
+      "serviceAccountClientId": "organization-mcp", "realmRoles": ["service","operator"]
+    }
+  ]
+}

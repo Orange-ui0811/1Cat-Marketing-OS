@@ -1,0 +1,28 @@
+{
+  "name": "@1cat/workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.0.0",
+    "@tanstack/react-query": "^5.85.5",
+    "antd": "^5.27.1",
+    "dayjs": "^1.11.13",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.4"
+  }
+}
