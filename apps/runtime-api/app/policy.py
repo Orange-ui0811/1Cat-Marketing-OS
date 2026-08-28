@@ -25,7 +25,10 @@ def canonical_hash(value: object) -> str:
 
 
 PII_PATTERNS = (
-    re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
+    # Do not treat a numeric run inside an opaque ASCII identifier (for example
+    # ``attempt_16099574444abc``) as a phone number.  Chinese prose immediately
+    # adjacent to a real phone number is still rejected.
+    re.compile(r"(?<![A-Za-z0-9_])1[3-9]\d{9}(?![A-Za-z0-9_])"),
     re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}"),
 )
 

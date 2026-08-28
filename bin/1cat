@@ -8,6 +8,19 @@ compose() {
   docker compose --env-file .env "$@"
 }
 
+run_python() {
+  if command -v python >/dev/null 2>&1 && python -c 'import sys' >/dev/null 2>&1; then
+    python "$@"
+  elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; then
+    python3 "$@"
+  elif command -v py >/dev/null 2>&1 && py -3 -c 'import sys' >/dev/null 2>&1; then
+    py -3 "$@"
+  else
+    echo "缺少可执行的 Python 3（已检查 python、python3、py -3）"
+    exit 1
+  fi
+}
+
 require_env() {
   if [ ! -f .env ]; then
     echo "尚未初始化。请先运行 ./bin/1cat init"
@@ -28,6 +41,43 @@ set_env_value() {
   chmod 600 .env
 }
 
+env_value() {
+  sed -n "s/^$1=//p" .env | tail -1
+}
+
+set_execution_control() {
+  enabled=$1
+  mkdir -p .runtime/control
+  tmp_file=".runtime/control/.model-runtime.tmp"
+  printf '{"execution_enabled":%s,"updated_by":"1cat-cli"}\n' "$enabled" > "$tmp_file"
+  mv "$tmp_file" .runtime/control/model-runtime.json
+  chmod 600 .runtime/control/model-runtime.json
+}
+
+execution_enabled_value() {
+  if [ -s .runtime/control/model-runtime.json ]; then
+    if grep -Eq '"execution_enabled"[[:space:]]*:[[:space:]]*true' .runtime/control/model-runtime.json; then
+      echo true
+    else
+      echo false
+    fi
+  else
+    env_value HERMES_EXECUTION_ENABLED
+  fi
+}
+
+ensure_model_gateway_token() {
+  if [ -z "$(env_value MODEL_GATEWAY_CLIENT_TOKEN)" ]; then
+    set_env_value MODEL_GATEWAY_CLIENT_TOKEN "$(random_secret)"
+  fi
+}
+
+build_profile_bundles() {
+  model_provider=$(env_value HERMES_MODEL_PROVIDER)
+  model_id=$(env_value HERMES_MODEL_ID)
+  run_python scripts/build_profiles.py --model-provider "$model_provider" --model-id "$model_id"
+}
+
 cmd=${1:-help}
 shift || true
 
@@ -38,14 +88,14 @@ case "$cmd" in
     docker info >/dev/null 2>&1 || { echo "Docker 尚未启动"; exit 1; }
     docker compose version >/dev/null
     docker buildx version >/dev/null
-    python3 scripts/verify_baseline.py
+    run_python scripts/verify_baseline.py
     commit=$(cat vendor/hermes-agent/UPSTREAM_COMMIT)
     [ "$commit" = "3c27eb6234bf91b8ceee9e9071591b31e9b148cb" ] || { echo "Hermes commit不匹配"; exit 1; }
-    echo "环境检查通过：Mac/Linux Docker Compose、基线和Hermes版本均可用。"
+    echo "环境检查通过：Docker Compose、基线和Hermes版本均可用。"
     ;;
   init)
-    mkdir -p .runtime/secrets .runtime/backups .runtime/keycloak
-    chmod 700 .runtime .runtime/secrets .runtime/backups .runtime/keycloak
+    mkdir -p .runtime/secrets .runtime/backups .runtime/keycloak .runtime/control
+    chmod 700 .runtime .runtime/secrets .runtime/backups .runtime/keycloak .runtime/control
     if [ ! -f .env ]; then
       cp .env.example .env
       chmod 600 .env
@@ -64,6 +114,7 @@ case "$cmd" in
     if ! grep -q '^ORG_MCP_CLIENT_SECRET=..' .env; then
       set_env_value ORG_MCP_CLIENT_SECRET "$(random_secret)"
     fi
+    ensure_model_gateway_token
     initial_admin_password=$(sed -n 's/^INITIAL_ADMIN_PASSWORD=//p' .env)
     org_mcp_client_secret=$(sed -n 's/^ORG_MCP_CLIENT_SECRET=//p' .env)
     sed -e "s/__INITIAL_ADMIN_PASSWORD__/$initial_admin_password/g" \
@@ -74,17 +125,30 @@ case "$cmd" in
       : > .runtime/secrets/model_api_key
       chmod 600 .runtime/secrets/model_api_key
     fi
-    python3 scripts/generate_contracts.py
-    python3 scripts/build_profiles.py
+    if [ ! -f .runtime/control/model-runtime.json ]; then
+      set_execution_control "$(env_value HERMES_EXECUTION_ENABLED)"
+    fi
+    run_python scripts/generate_contracts.py
+    build_profile_bundles
     compose config --quiet
     echo "初始化完成。Secret保存在项目的.env与.runtime目录，不会进入部署包。首次登录用户为admin，密码见.env中的INITIAL_ADMIN_PASSWORD。"
     ;;
   up)
     require_env
-    if [ -f .release-bundle ]; then
-      compose --profile agents up -d
+    model_mode=$(env_value MODEL_MODE)
+    execution_enabled=$(execution_enabled_value)
+    if [ "$model_mode" = "deepseek-api-key" ]; then
+      if [ -f .release-bundle ]; then
+        compose --profile agents --profile api-key up -d
+      else
+        compose --profile agents --profile api-key up -d --build
+      fi
     else
-      compose --profile agents up -d --build
+      if [ -f .release-bundle ]; then
+        compose --profile agents up -d
+      else
+        compose --profile agents up -d --build
+      fi
     fi
     compose exec -T keycloak sh -eu -c '
       /opt/keycloak/bin/kcadm.sh config credentials --server http://127.0.0.1:8080/auth --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null
@@ -93,20 +157,20 @@ case "$cmd" in
       /opt/keycloak/bin/kcadm.sh update "clients/$client_uuid" -r 1cat -s "secret=$ORG_MCP_CLIENT_SECRET" >/dev/null
       /opt/keycloak/bin/kcadm.sh set-password -r 1cat --username admin --new-password "$INITIAL_ADMIN_PASSWORD" >/dev/null
     '
-    if compose run --rm --no-deps --entrypoint sh profile-init -c 'test -s /opt/data/auth.json' >/dev/null 2>&1; then
-      echo "三个Hermes Gateway已启用真实模型执行。"
+    if [ "$execution_enabled" = "true" ]; then
+      echo "三个Hermes Gateway已启用真实模型执行：$(env_value HERMES_MODEL_PROVIDER)/$(env_value HERMES_MODEL_ID)。"
     else
-      echo "核心工作台和三个Hermes Gateway已启动；真实模型执行保持关闭。运行 ./bin/1cat auth codex 完成项目专用授权。"
+      echo "核心工作台和三个Hermes Gateway已启动；真实模型执行保持关闭。运行 ./bin/1cat auth deepseek 安全配置项目专用Key。"
     fi
     echo "工作台：http://localhost:8080"
     ;;
   down)
     require_env
-    compose --profile agents --profile api-key down
+    compose --profile agents --profile api-key --profile observability down
     ;;
   status)
     require_env
-    compose --profile agents ps
+    compose --profile agents --profile api-key ps
     ;;
   logs)
     require_env
@@ -115,32 +179,114 @@ case "$cmd" in
   auth)
     require_env
     provider=${1:-}
-    [ "$provider" = "codex" ] || { echo "用法：./bin/1cat auth codex"; exit 1; }
-    compose up -d egress-proxy
-    if [ ! -f .release-bundle ]; then
-      compose --profile auth build hermes-auth
+    shift || true
+    if [ "$provider" = "deepseek" ]; then
+      set_env_value HERMES_EXECUTION_ENABLED false
+      set_execution_control false
+      set_env_value HERMES_MODEL_PROVIDER deepseek
+      set_env_value HERMES_MODEL_ID deepseek-v4-pro
+      set_env_value MODEL_MODE deepseek-api-key
+      set_env_value MODEL_UPSTREAM_BASE_URL https://api.deepseek.com
+      ensure_model_gateway_token
+      if [ "${1:-}" = "--reuse-secret" ]; then
+        [ -s .runtime/secrets/model_api_key ] || { echo "DeepSeek Secret is empty."; exit 1; }
+      elif [ "${1:-}" = "--from-file" ]; then
+        [ -n "${2:-}" ] || { echo "Missing key file path."; exit 1; }
+        run_python scripts/configure_model_key.py --from-file "$2"
+      else
+        run_python scripts/configure_model_key.py
+      fi
+      build_profile_bundles
+      if [ -f .release-bundle ]; then
+        compose --profile api-key up -d --force-recreate --wait --wait-timeout 120 model-gateway
+      else
+        compose --profile api-key up -d --build --force-recreate --wait --wait-timeout 120 model-gateway
+      fi
+      compose exec -T model-gateway python -c 'import os, urllib.request; request=urllib.request.Request("http://127.0.0.1:8010/v1/models", headers={"Authorization": "Bearer " + os.environ["MODEL_GATEWAY_CLIENT_TOKEN"]}); urllib.request.urlopen(request, timeout=60).read()'
+      set_env_value HERMES_EXECUTION_ENABLED true
+      set_execution_control true
+      echo "DeepSeek Key、上游连通性和模型列表验证通过。运行 ./bin/1cat restart-agents。"
+    elif [ "$provider" = "codex" ]; then
+      compose up -d egress-proxy
+      if [ ! -f .release-bundle ]; then
+        compose --profile auth build hermes-auth
+      fi
+      compose --profile auth run --rm hermes-auth
+      set_env_value HERMES_MODEL_PROVIDER openai-codex
+      set_env_value HERMES_MODEL_ID gpt-5.6-terra
+      set_env_value MODEL_MODE codex-oauth
+      set_env_value HERMES_EXECUTION_ENABLED true
+      set_execution_control true
+      build_profile_bundles
+      echo "项目专用Codex授权完成。运行 ./bin/1cat restart-agents。"
+    else
+      echo "用法：./bin/1cat auth {deepseek|codex}"
+      exit 1
     fi
-    compose --profile auth run --rm hermes-auth
-    set_env_value HERMES_EXECUTION_ENABLED true
-    echo "项目专用Codex授权完成。运行 ./bin/1cat restart-agents。"
     ;;
   restart-agents)
     require_env
-    if [ -f .release-bundle ]; then
-      compose --profile agents up -d --force-recreate runtime-worker hermes-pma hermes-bga hermes-mo
+    compose --profile agents up --force-recreate profile-init
+    if [ "$(env_value MODEL_MODE)" = "deepseek-api-key" ]; then
+      if [ -f .release-bundle ]; then
+        compose --profile agents --profile api-key up -d --force-recreate model-gateway runtime-worker hermes-pma hermes-bga hermes-mo
+      else
+        compose --profile agents --profile api-key up -d --build --force-recreate model-gateway runtime-worker hermes-pma hermes-bga hermes-mo
+      fi
     else
-      compose --profile agents up -d --build --force-recreate runtime-worker hermes-pma hermes-bga hermes-mo
+      if [ -f .release-bundle ]; then
+        compose --profile agents up -d --force-recreate runtime-worker hermes-pma hermes-bga hermes-mo
+      else
+        compose --profile agents up -d --build --force-recreate runtime-worker hermes-pma hermes-bga hermes-mo
+      fi
+    fi
+    ;;
+  model-test)
+    require_env
+    [ "$(env_value MODEL_MODE)" = "deepseek-api-key" ] || { echo "当前不是 DeepSeek API Key 模式。"; exit 1; }
+    [ -s .runtime/secrets/model_api_key ] || { echo "DeepSeek Secret is empty."; exit 1; }
+    compose --profile api-key exec -T model-gateway python -c 'import json, os, urllib.request; body=json.dumps({"model":os.environ["MODEL_UPSTREAM_MODEL_ID"],"messages":[{"role":"user","content":"Reply with exactly OK."}],"stream":False,"max_tokens":32}).encode(); request=urllib.request.Request("http://127.0.0.1:8010/v1/chat/completions",data=body,headers={"Authorization":"Bearer "+os.environ["MODEL_GATEWAY_CLIENT_TOKEN"],"Content-Type":"application/json"}); payload=json.load(urllib.request.urlopen(request,timeout=120)); assert payload.get("choices"), "model response has no choices"; print("DeepSeek chat completion test passed.")'
+    ;;
+  observe)
+    require_env
+    action=${1:-up}
+    if [ "$action" = "up" ]; then
+      set_env_value OTEL_EXPORTER_OTLP_ENDPOINT http://otel-collector:4318
+      compose --profile observability up -d --build --force-recreate \
+        runtime-api runtime-worker organization-mcp otel-collector jaeger prometheus grafana
+      echo "可观测性已启用：Jaeger http://localhost:16686 · Prometheus http://localhost:9090 · Grafana http://localhost:3000"
+    elif [ "$action" = "down" ]; then
+      compose --profile observability stop grafana prometheus otel-collector jaeger
+      set_env_value OTEL_EXPORTER_OTLP_ENDPOINT ""
+      compose up -d --force-recreate runtime-api runtime-worker organization-mcp
+      echo "可观测性已停止，Runtime已切回无 OTLP 导出模式。"
+    else
+      echo "用法：./bin/1cat observe {up|down}"
+      exit 2
     fi
     ;;
   smoke)
     require_env
-    python3 scripts/smoke.py
+    run_python scripts/smoke.py
     ;;
   test)
     ./scripts/test.sh
     ;;
   e2e)
     ./scripts/test-e2e.sh
+    ;;
+  workflow-demo)
+    require_env
+    mode=${1:-synthetic}
+    [ "$mode" = "synthetic" ] || [ "$mode" = "real" ] || { echo "用法：./bin/1cat workflow-demo {synthetic|real}"; exit 2; }
+    run_python scripts/marketing_workflow_demo.py --mode "$mode"
+    ;;
+  workspace-sync)
+    run_python scripts/sync_workspace_mirror.py "$@"
+    ;;
+  portfolio-check)
+    require_env
+    run_python scripts/week8_readiness.py --online --write-evidence "$@"
     ;;
   backup)
     require_env
@@ -184,6 +330,6 @@ case "$cmd" in
     ./scripts/package.sh "$platform"
     ;;
   help|*)
-    echo "用法：./bin/1cat {doctor|init|up|down|status|logs|auth codex|restart-agents|smoke|test|e2e|backup|restore <dir> --confirm|package arm64|package amd64|package all}"
+    echo "用法：./bin/1cat {doctor|init|up|down|status|logs|auth deepseek|auth codex|restart-agents|model-test|observe up|observe down|smoke|test|e2e|workflow-demo synthetic|workflow-demo real|workspace-sync --check|portfolio-check|backup|restore <dir> --confirm|package arm64|package amd64|package all}"
     ;;
 esac

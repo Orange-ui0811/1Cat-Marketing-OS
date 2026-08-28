@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -11,6 +12,47 @@ from pathlib import Path
 
 BASE = "http://localhost:8080"
 ROOT = Path(__file__).resolve().parents[1]
+SMOKE_BATCH = f"RUNTIME SMOKE {uuid.uuid4().hex}"
+SMOKE_WORKER_CONTAINER = "1cat-runtime-smoke-worker"
+
+
+def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["docker", "compose", *args],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    if check and result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"docker compose {' '.join(args)} failed: {detail}")
+    return result
+
+
+def start_private_synthetic_worker() -> None:
+    remove_private_synthetic_worker()
+    compose(
+        "run", "--no-deps", "-d", "--name", SMOKE_WORKER_CONTAINER,
+        "-e", "WORKER_ID=smoke-private-worker",
+        "-e", f"RUNTIME_CLAIM_INPUT_PREFIX={SMOKE_BATCH}",
+        "-e", "HERMES_EXECUTION_ENABLED=false",
+        "-e", "HERMES_EXECUTION_STATE_FILE=/runtime-control/smoke-model-disabled.json",
+        "-e", "OTEL_EXPORTER_OTLP_ENDPOINT=",
+        "runtime-worker",
+    )
+
+
+def remove_private_synthetic_worker() -> None:
+    subprocess.run(
+        ["docker", "rm", "-f", SMOKE_WORKER_CONTAINER],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def env_value(name: str) -> str:
@@ -59,7 +101,10 @@ def accept_and_run(token: str, role_id: str, title: str, objective: str, instruc
          {"status": "accepted", "reason": "合成Smoke路径的人工接受"}, token)
     run = call("/v1/runs", "POST", {
         "commitment_id": commitment["id"], "role_id": role_id,
-        "input": instruction, "context_version": 1,
+        "input": f"{SMOKE_BATCH}; {instruction}", "context_version": 1,
+        # Smoke must remain deterministic even when the operator has enabled
+        # real DeepSeek execution for interactive runs.
+        "execution_mode": "synthetic",
     }, token)
     for _ in range(30):
         time.sleep(1)
@@ -80,7 +125,7 @@ def login() -> str:
         return json.load(response)["access_token"]
 
 
-def main():
+def run_smoke():
     print("[1/12] 检查服务健康与身份")
     assert call("/health/ready")["status"] == "ready"
     token = login()
@@ -123,6 +168,20 @@ def main():
     print("[12/12] 验证审计链")
     assert len(call("/v1/audit", token=token)) >= 12
     print("Smoke Test通过：合成Brief→PMA→BGA→人工任务→LeadStub→销售反馈→MO复盘完整闭环可用；未执行真实发布或真实业务验收。")
+
+
+def main():
+    running_services = set(compose("ps", "--status", "running", "--services").stdout.splitlines())
+    restore_regular_worker = "runtime-worker" in running_services
+    try:
+        if restore_regular_worker:
+            compose("stop", "runtime-worker")
+        start_private_synthetic_worker()
+        run_smoke()
+    finally:
+        remove_private_synthetic_worker()
+        if restore_regular_worker:
+            compose("start", "runtime-worker", check=False)
 
 
 if __name__ == "__main__":

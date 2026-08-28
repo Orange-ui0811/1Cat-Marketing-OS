@@ -4,6 +4,8 @@
 dist/*
 !dist/.gitkeep
 node_modules/
+.venv/
+*.tsbuildinfo
 __pycache__/
 .pytest_cache/
 .coverage

@@ -1,16 +1,32 @@
 import os
+import logging
 import time
 import uuid
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from candidate_contract import (
+    CandidateKind,
+    allowed_candidate_kinds,
+    candidate_metadata,
+    validate_candidate_kind,
+    validate_manual_publish_context,
+)
+from commitment_contract import CommitmentAction, target_commitment_status
+from observability import configure_observability, metrics
 
 RUNTIME = os.getenv("RUNTIME_API_URL", "http://runtime-api:8000")
 KEYCLOAK = os.getenv("KEYCLOAK_TOKEN_URL", "http://keycloak:8080/auth/realms/1cat/protocol/openid-connect/token")
 CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "organization-mcp")
 CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
 DEV = os.getenv("AUTH_MODE", "oidc") == "development"
+
+configure_observability(service_name="1cat-organization-mcp")
+log = logging.getLogger("1cat.organization-mcp")
+_attempt_link: ContextVar[object | None] = ContextVar("attempt_link", default=None)
+_runtime_context: ContextVar[dict[str, str]] = ContextVar("runtime_context", default={})
 
 mcp = FastMCP("1Cat Organization Runtime", host="0.0.0.0", port=8001)
 _token = {"value": "", "expires": 0.0}
@@ -40,12 +56,62 @@ def request(method: str, path: str, *, payload: dict | None = None, correlation_
         headers["Authorization"] = f"Bearer {token()}"
     if if_match is not None:
         headers["If-Match"] = str(if_match)
-    response = httpx.request(method, f"{RUNTIME}{path}", json=payload, headers=headers, timeout=20)
-    response.raise_for_status()
+    runtime_context = _runtime_context.get()
+    span_attributes = {
+        "http.request.method": method,
+        "url.path": path,
+        "onecat.correlation_id": correlation_id,
+    }
+    for field, attribute in (
+        ("run_id", "onecat.run.id"),
+        ("attempt_id", "onecat.attempt.id"),
+        ("hermes_run_id", "onecat.hermes_run.id"),
+        ("case_id", "onecat.case.id"),
+        ("stage_key", "onecat.stage.key"),
+    ):
+        if value := runtime_context.get(field):
+            span_attributes[attribute] = value
+    if run_correlation_id := runtime_context.get("correlation_id"):
+        span_attributes["onecat.run.correlation_id"] = run_correlation_id
+
+    def record_call(response: httpx.Response) -> None:
+        result = "accepted" if response.is_success else "rejected"
+        metrics.add(metrics.mcp_calls, tool_path=path, result=result)
+        log.info("MCP runtime call", extra={
+            "correlation_id": correlation_id,
+            "tool_call_id": path,
+            "status": result,
+            **runtime_context,
+        })
+
+    try:
+        from opentelemetry import trace
+
+        link = _attempt_link.get()
+        links = [link] if link is not None else None
+        tracer = trace.get_tracer("onecat.organization-mcp")
+        with tracer.start_as_current_span(
+            "organization-mcp.runtime-call", links=links,
+            attributes=span_attributes,
+        ):
+            response = httpx.request(method, f"{RUNTIME}{path}", json=payload, headers=headers, timeout=20)
+            record_call(response)
+    except ImportError:
+        response = httpx.request(method, f"{RUNTIME}{path}", json=payload, headers=headers, timeout=20)
+        record_call(response)
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail", response.text)
+        except (ValueError, AttributeError):
+            detail = response.text
+        safe_detail = str(detail).replace("\r", " ").replace("\n", " ")[:500]
+        raise ValueError(f"Runtime API {response.status_code}: {safe_detail}")
     return response.json()
 
 
-def assert_context(role_id: str, profile_id: str, commitment_id: str, attempt_id: str) -> None:
+def assert_context(role_id: str, profile_id: str, commitment_id: str, attempt_id: str) -> dict:
+    _attempt_link.set(None)
+    _runtime_context.set({})
     expected = {"DROLE-01": "pma", "DROLE-02": "bga", "DROLE-03": "mo"}
     if expected.get(role_id) != profile_id:
         raise ValueError("role/profile mismatch")
@@ -57,10 +123,33 @@ def assert_context(role_id: str, profile_id: str, commitment_id: str, attempt_id
         raise ValueError("commitment not found")
     if commitment.get("proposed_role") != role_id and commitment.get("committed_role") != role_id:
         raise ValueError("commitment role mismatch")
-    run = request("GET", f"/v1/runs/{attempt_id}")
+    attempt = request("GET", f"/v1/attempts/{attempt_id}")
+    run = attempt.get("run") or {}
     if (run.get("commitment_id") != commitment_id or run.get("role_id") != role_id
             or run.get("profile_id") != profile_id):
         raise ValueError("attempt context mismatch")
+    if run.get("current_attempt_id") != attempt_id or attempt.get("status") not in {"claimed", "running"}:
+        raise ValueError("attempt is not the active runtime lease")
+    _runtime_context.set({
+        "run_id": run["id"],
+        "attempt_id": attempt_id,
+        "correlation_id": run.get("correlation_id") or "",
+        "hermes_run_id": attempt.get("hermes_run_id") or "",
+        "case_id": run.get("case_id") or "",
+        "stage_key": run.get("stage_key") or "",
+    })
+    traceparent = run.get("traceparent")
+    if traceparent:
+        try:
+            from opentelemetry import trace
+            from opentelemetry.propagate import extract
+
+            span_context = trace.get_current_span(extract({"traceparent": traceparent})).get_span_context()
+            if span_context.is_valid:
+                _attempt_link.set(trace.Link(span_context, {"onecat.attempt.id": attempt_id}))
+        except ImportError:
+            pass
+    return run
 
 
 @mcp.tool()
@@ -102,34 +191,37 @@ def commitment_read(role_id: str, profile_id: str, commitment_id: str, attempt_i
 
 @mcp.tool()
 def commitment_respond(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
-                       action: str, reason: str) -> dict:
-    """有界响应Commitment；Agent可接受、开始、等待、送审、请求接管或暂停，不能自行fulfilled。"""
+                       action: CommitmentAction, reason: str) -> dict:
+    """单步响应Commitment。action仅可为accept/activate/wait/submit/request_takeover/pause；不能自行fulfilled。"""
     assert_context(role_id, profile_id, commitment_id, attempt_id)
-    transitions = {
-        "accept": "accepted", "activate": "active", "wait": "waiting",
-        "submit": "submitted", "request_takeover": "manual_takeover", "pause": "paused",
-    }
-    target = transitions.get(action)
-    if not target:
-        raise ValueError("unsupported commitment action")
+    target = target_commitment_status(action)
     current = commitment_read(role_id, profile_id, commitment_id, attempt_id)
     if current.get("proposed_role") != role_id and current.get("committed_role") != role_id:
         raise ValueError("commitment owner mismatch")
+    if current.get("status") == target:
+        return current
     return request("POST", f"/v1/commitments/{commitment_id}/transition",
                    correlation_id=f"{attempt_id}-{uuid.uuid4().hex}",
                    if_match=int(current["version"]), payload={"status": target, "reason": reason})
 
 
 @mcp.tool()
-def object_create_candidate(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
-                            kind: str, title: str, body: str, source_refs: list[str]) -> dict:
-    """创建候选知识或内容对象；不能创建正式Fact/Claim。"""
+def candidate_kinds_read(role_id: str, profile_id: str, commitment_id: str, attempt_id: str) -> dict:
+    """返回当前岗位可用于object_create_candidate的精确kind枚举；不要猜测或改写这些值。"""
     assert_context(role_id, profile_id, commitment_id, attempt_id)
-    if kind not in {"brief", "evidence", "fact", "claim", "campaign", "content", "review"}:
-        raise ValueError("unsupported candidate kind")
+    return {"role_id": role_id, "allowed_kinds": list(allowed_candidate_kinds(role_id))}
+
+
+@mcp.tool()
+def object_create_candidate(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
+                            kind: CandidateKind, title: str, body: str, source_refs: list[str]) -> dict:
+    """创建候选对象。PMA仅brief/evidence/fact/claim；BGA仅campaign/content/review；MO仅review。"""
+    run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    validate_candidate_kind(role_id, kind)
+    metadata = candidate_metadata(role_id, commitment_id, attempt_id, run)
     return request("POST", "/v1/knowledge", correlation_id=f"{attempt_id}-{uuid.uuid4().hex}", payload={
         "kind": kind, "title": title, "body": body, "source_refs": source_refs,
-        "metadata": {"candidate": True, "role_id": role_id, "commitment_id": commitment_id, "attempt_id": attempt_id},
+        "metadata": metadata,
     })
 
 
@@ -159,9 +251,8 @@ def approval_status_verify(role_id: str, profile_id: str, commitment_id: str, at
 def manual_publish_task_create(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
                                platform: str, object_ref: dict, instructions: str) -> dict:
     """创建不可变人工发布任务。该Tool不会登录或写入任何内容平台。"""
-    assert_context(role_id, profile_id, commitment_id, attempt_id)
-    if role_id != "DROLE-02":
-        raise ValueError("only BGA may prepare manual publishing")
+    run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    validate_manual_publish_context(role_id, run)
     if platform == "wechat_channels":
         raise ValueError("SKL-BG-11/video channel is dormant in R0")
     if platform not in {"douyin", "xiaohongshu", "bilibili", "wechat_official"}:

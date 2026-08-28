@@ -9,6 +9,10 @@ def test_health_and_roles(client, auth_headers):
     assert client.get("/health/ready").json()["pii_enabled"] is False
     roles = client.get("/v1/roles", headers=auth_headers).json()
     assert {role["profile_id"] for role in roles} == {"pma", "bga", "mo"}
+    model = client.get("/v1/runtime-model", headers=auth_headers).json()
+    assert model["provider"] == "deepseek"
+    assert model["model"] == "deepseek-v4-pro"
+    assert model["execution_enabled"] is False
 
 
 def test_write_headers_required(client, auth_headers):
@@ -29,10 +33,12 @@ def test_commitment_state_and_run_boundary(client, write_headers, auth_headers):
     assert client.post(f"/v1/commitments/{commitment['id']}/transition", headers=good,
                        json={"status": "accepted", "reason": "测试接受"}).status_code == 200
     run_headers = dict(write_headers); run_headers["Idempotency-Key"] = "run-once"; run_headers["X-Correlation-ID"] = "run-once"
+    run_headers["traceparent"] = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
     run = client.post("/v1/runs", headers=run_headers, json={
         "commitment_id": commitment["id"], "role_id": "DROLE-01", "input": "生成候选", "context_version": 1,
     })
     assert run.status_code == 202 and run.json()["status"] == "queued"
+    assert run.json()["trace_id"] == "0123456789abcdef0123456789abcdef"
 
 
 def test_idempotency_conflict(client, write_headers):
@@ -112,6 +118,21 @@ def test_all_business_writes_reject_obvious_pii(client, write_headers):
         "source_refs": [], "metadata": {},
     })
     assert response.status_code == 422
+
+
+def test_opaque_attempt_id_is_not_misclassified_as_phone(client, write_headers):
+    headers = dict(write_headers, **{
+        "Idempotency-Key": "opaque-attempt-id",
+        "X-Correlation-ID": "opaque-attempt-id",
+    })
+    response = client.post("/v1/knowledge", headers=headers, json={
+        "kind": "review",
+        "title": "合法复盘候选",
+        "body": "仅验证随机运行标识不会被误判为手机号。",
+        "source_refs": ["synthetic://case/case_26571297a8f9438e891d18fe77771f86"],
+        "metadata": {"attempt_id": "attempt_16099574444cb0b3f317739a5c693e"},
+    })
+    assert response.status_code == 201, response.text
 
 
 @pytest.mark.parametrize("fact", ["联系我13800138000", "邮件test@example.com"])

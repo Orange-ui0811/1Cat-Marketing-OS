@@ -1,0 +1,10 @@
+# Profile bundle hashes are byte-sensitive and must be identical on every host.
+profiles/** text eol=lf
+
+# Files executed or parsed inside Linux containers must never inherit the
+# Windows checkout's CRLF conversion.
+*.sh text eol=lf
+Dockerfile text eol=lf
+bin/1cat text eol=lf
+infra/egress-proxy/*.conf text eol=lf
+infra/egress-proxy/filter text eol=lf

@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 CommitmentStatus = Literal[
@@ -49,6 +49,7 @@ class RunCreate(BaseModel):
     role_id: Literal["DROLE-01", "DROLE-02", "DROLE-03"]
     input: str = Field(min_length=2)
     context_version: int = Field(default=1, ge=1)
+    execution_mode: Literal["auto", "synthetic", "real"] = "auto"
 
 
 class ManualTaskCreate(BaseModel):
@@ -60,8 +61,37 @@ class ManualTaskCreate(BaseModel):
 
 
 class ManualTaskReceipt(BaseModel):
-    status: Literal["completed", "failed", "unknown"]
+    status: Literal["completed", "failed", "unknown", "simulated"]
     receipt: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_simulated_boundary(self):
+        if self.status == "simulated":
+            if self.receipt.get("external_effect") is not False or not self.receipt.get("case_id"):
+                raise ValueError("simulated回执必须声明external_effect=false并包含case_id")
+        return self
+
+
+class MarketingCaseCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=240)
+    objective: str = Field(min_length=4)
+    brief_body: str = Field(min_length=4)
+    source_refs: list[str] = Field(min_length=1)
+    target_platform: Literal["douyin", "xiaohongshu", "bilibili", "wechat_official"]
+    execution_mode: Literal["synthetic", "real"] = "synthetic"
+
+
+MarketingCaseAction = Literal[
+    "start_mo_plan", "approve_mo_plan", "start_pma", "approve_product",
+    "start_bga", "approve_content", "record_simulated_publish",
+    "record_synthetic_feedback", "start_mo_retrospective", "accept_retrospective",
+    "retry_safe_step", "cancel_case",
+]
+
+
+class MarketingCaseCommand(BaseModel):
+    action: MarketingCaseAction
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class LeadStubCreate(BaseModel):

@@ -14,6 +14,11 @@
   handle /health/* {
     reverse_proxy runtime-api:8000
   }
+  handle /local-admin/* {
+    reverse_proxy runtime-api:8000 {
+      header_up X-Local-Admin-Token {$LOCAL_ADMIN_TOKEN}
+    }
+  }
   handle {
     reverse_proxy workspace:8080
   }

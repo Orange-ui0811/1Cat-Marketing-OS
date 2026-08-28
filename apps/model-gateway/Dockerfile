@@ -1,4 +1,5 @@
-FROM python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+ARG DOCKER_HUB_REGISTRY=docker.io
+FROM ${DOCKER_HUB_REGISTRY}/library/python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN groupadd --gid 10004 onecat && useradd --uid 10004 --gid onecat --create-home onecat

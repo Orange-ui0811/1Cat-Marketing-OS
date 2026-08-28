@@ -4,6 +4,8 @@ x-hermes-common: &hermes-common
   build:
     context: .
     dockerfile: infra/hermes/Dockerfile
+    args:
+      HERMES_IMAGE_REGISTRY: ${HERMES_IMAGE_REGISTRY:-docker.io}
   image: 1cat/hermes-agent:0.20.0
   user: "10000:10000"
   entrypoint: ["/opt/hermes/.venv/bin/hermes"]
@@ -31,9 +33,13 @@ x-hermes-common: &hermes-common
     timeout: 5s
     retries: 20
 
+x-deepseek-model-environment: &deepseek-model-environment
+  DEEPSEEK_API_KEY: ${MODEL_GATEWAY_CLIENT_TOKEN:-model-gateway-not-configured}
+  DEEPSEEK_BASE_URL: http://model-gateway:8010/v1
+
 services:
   postgres:
-    image: pgvector/pgvector:pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/pgvector/pgvector:pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-onecat}
@@ -51,13 +57,13 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   minio-init:
-    image: alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
     restart: "no"
     volumes: ["minio-data:/data"]
     command: ["sh", "-c", "chown -R 1000:1000 /data && chmod 700 /data"]
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
     user: "1000:1000"
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -111,21 +117,39 @@ services:
     build:
       context: .
       dockerfile: apps/runtime-api/Dockerfile
+      args:
+        DOCKER_HUB_REGISTRY: ${DOCKER_HUB_REGISTRY:-docker.io}
     image: 1cat/runtime-api:0.1.0
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-onecat}:${POSTGRES_PASSWORD:-onecat-local-change-me}@postgres:5432/${POSTGRES_DB:-onecat}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-5}
+      DATABASE_POOL_RECYCLE_SECONDS: ${DATABASE_POOL_RECYCLE_SECONDS:-300}
       AUTH_MODE: ${AUTH_MODE:-oidc}
       OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8080/auth/realms/1cat}
       OIDC_JWKS_URL: ${OIDC_JWKS_URL:-http://keycloak:8080/auth/realms/1cat/protocol/openid-connect/certs}
       HERMES_EXECUTION_ENABLED: ${HERMES_EXECUTION_ENABLED:-false}
+      HERMES_MODEL_PROVIDER: ${HERMES_MODEL_PROVIDER:-deepseek}
+      HERMES_MODEL_ID: ${HERMES_MODEL_ID:-deepseek-v4-pro}
+      MODEL_MODE: ${MODEL_MODE:-deepseek-api-key}
+      MODEL_GATEWAY_URL: http://model-gateway:8010
+      MODEL_GATEWAY_CLIENT_TOKEN: ${MODEL_GATEWAY_CLIENT_TOKEN:-}
+      MODEL_API_KEY_FILE: /runtime-secrets/model_api_key
+      MODEL_RUNTIME_STATE_FILE: /runtime-control/model-runtime.json
+      LOCAL_ADMIN_TOKEN: ${MODEL_GATEWAY_CLIENT_TOKEN:-}
       PII_ENABLED: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: 1cat-runtime-api
     depends_on:
       postgres:
         condition: service_healthy
       keycloak:
         condition: service_healthy
-    networks: [data, service, edge]
+    volumes:
+      - ./.runtime/secrets:/runtime-secrets
+      - ./.runtime/control:/runtime-control
+    networks: [data, service, edge, agent-control, observability]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
       interval: 5s
@@ -138,11 +162,20 @@ services:
     build:
       context: .
       dockerfile: apps/runtime-worker/Dockerfile
+      args:
+        DOCKER_HUB_REGISTRY: ${DOCKER_HUB_REGISTRY:-docker.io}
     image: 1cat/runtime-worker:0.1.0
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-onecat}:${POSTGRES_PASSWORD:-onecat-local-change-me}@postgres:5432/${POSTGRES_DB:-onecat}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-5}
+      DATABASE_POOL_RECYCLE_SECONDS: ${DATABASE_POOL_RECYCLE_SECONDS:-300}
+      DATABASE_RETRY_INITIAL_SECONDS: ${DATABASE_RETRY_INITIAL_SECONDS:-1}
+      DATABASE_RETRY_MAX_SECONDS: ${DATABASE_RETRY_MAX_SECONDS:-10}
       HERMES_EXECUTION_ENABLED: ${HERMES_EXECUTION_ENABLED:-false}
+      HERMES_MODEL_PROVIDER: ${HERMES_MODEL_PROVIDER:-deepseek}
+      HERMES_MODEL_ID: ${HERMES_MODEL_ID:-deepseek-v4-pro}
       HERMES_PMA_URL: http://hermes-pma:8080
       HERMES_BGA_URL: http://hermes-bga:8080
       HERMES_MO_URL: http://hermes-mo:8080
@@ -150,12 +183,22 @@ services:
       HERMES_API_KEY_BGA: ${HERMES_API_KEY_BGA:-local-bga-change-me}
       HERMES_API_KEY_MO: ${HERMES_API_KEY_MO:-local-mo-change-me}
       PROFILE_ROOT: /profiles
+      RUN_LEASE_SECONDS: ${RUN_LEASE_SECONDS:-30}
+      RUN_HEARTBEAT_SECONDS: ${RUN_HEARTBEAT_SECONDS:-10}
+      RUN_RECOVERY_SCAN_SECONDS: ${RUN_RECOVERY_SCAN_SECONDS:-5}
+      RUN_MAX_ATTEMPTS: ${RUN_MAX_ATTEMPTS:-2}
+      HERMES_POLL_SECONDS: ${HERMES_POLL_SECONDS:-2}
+      HERMES_MAX_POLLS: ${HERMES_MAX_POLLS:-360}
+      HERMES_EXECUTION_STATE_FILE: /runtime-control/model-runtime.json
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: 1cat-runtime-worker
     volumes:
       - ./profiles:/profiles:ro
+      - ./.runtime/control:/runtime-control:ro
     depends_on:
       runtime-api:
         condition: service_healthy
-    networks: [data, agent-control]
+    networks: [data, agent-control, observability]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
 
@@ -163,6 +206,8 @@ services:
     build:
       context: .
       dockerfile: apps/organization-mcp/Dockerfile
+      args:
+        DOCKER_HUB_REGISTRY: ${DOCKER_HUB_REGISTRY:-docker.io}
     image: 1cat/organization-mcp:0.1.0
     restart: unless-stopped
     environment:
@@ -171,10 +216,12 @@ services:
       KEYCLOAK_TOKEN_URL: http://keycloak:8080/auth/realms/1cat/protocol/openid-connect/token
       OIDC_CLIENT_ID: organization-mcp
       OIDC_CLIENT_SECRET: ${ORG_MCP_CLIENT_SECRET}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: 1cat-organization-mcp
     depends_on:
       runtime-api:
         condition: service_healthy
-    networks: [service, agent-control]
+    networks: [service, agent-control, observability]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
 
@@ -182,6 +229,8 @@ services:
     build:
       context: .
       dockerfile: apps/workspace/Dockerfile
+      args:
+        DOCKER_HUB_REGISTRY: ${DOCKER_HUB_REGISTRY:-docker.io}
     image: 1cat/workspace:0.1.0
     restart: unless-stopped
     networks: [edge]
@@ -192,11 +241,14 @@ services:
     build:
       context: .
       dockerfile: infra/caddy/Dockerfile
+      args:
+        DOCKER_HUB_REGISTRY: ${DOCKER_HUB_REGISTRY:-docker.io}
     image: 1cat/caddy:2.10.2
     restart: unless-stopped
     environment:
       XDG_CONFIG_HOME: /tmp/config
       XDG_DATA_HOME: /tmp/data
+      LOCAL_ADMIN_TOKEN: ${MODEL_GATEWAY_CLIENT_TOKEN:-}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -213,7 +265,7 @@ services:
     cap_drop: ["ALL"]
 
   profile-init:
-    image: alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
     restart: "no"
     volumes:
       - hermes-data:/opt/data
@@ -226,6 +278,8 @@ services:
     build:
       context: .
       dockerfile: infra/hermes/Dockerfile
+      args:
+        HERMES_IMAGE_REGISTRY: ${HERMES_IMAGE_REGISTRY:-docker.io}
     image: 1cat/hermes-agent:0.20.0
     user: "10000:10000"
     entrypoint: ["/opt/hermes/.venv/bin/python"]
@@ -233,7 +287,7 @@ services:
       HERMES_HOME: /opt/data
       HTTP_PROXY: http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
-      NO_PROXY: localhost,127.0.0.1,organization-mcp
+      NO_PROXY: localhost,127.0.0.1,organization-mcp,model-gateway
     volumes:
       - hermes-data:/opt/data
       - ./scripts/codex_login.py:/scripts/codex_login.py:ro
@@ -244,39 +298,42 @@ services:
     <<: *hermes-common
     profiles: ["agents"]
     environment:
+      <<: *deepseek-model-environment
       HERMES_HOME: /opt/data
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: 8080
       API_SERVER_KEY: ${HERMES_API_KEY_PMA:-local-pma-change-me}
       HTTP_PROXY: http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
-      NO_PROXY: localhost,127.0.0.1,organization-mcp
+      NO_PROXY: localhost,127.0.0.1,organization-mcp,model-gateway
     command: ["-p", "pma", "gateway", "run", "--no-supervise", "--external-supervisor"]
 
   hermes-bga:
     <<: *hermes-common
     profiles: ["agents"]
     environment:
+      <<: *deepseek-model-environment
       HERMES_HOME: /opt/data
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: 8080
       API_SERVER_KEY: ${HERMES_API_KEY_BGA:-local-bga-change-me}
       HTTP_PROXY: http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
-      NO_PROXY: localhost,127.0.0.1,organization-mcp
+      NO_PROXY: localhost,127.0.0.1,organization-mcp,model-gateway
     command: ["-p", "bga", "gateway", "run", "--no-supervise", "--external-supervisor"]
 
   hermes-mo:
     <<: *hermes-common
     profiles: ["agents"]
     environment:
+      <<: *deepseek-model-environment
       HERMES_HOME: /opt/data
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: 8080
       API_SERVER_KEY: ${HERMES_API_KEY_MO:-local-mo-change-me}
       HTTP_PROXY: http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
-      NO_PROXY: localhost,127.0.0.1,organization-mcp
+      NO_PROXY: localhost,127.0.0.1,organization-mcp,model-gateway
     command: ["-p", "mo", "gateway", "run", "--no-supervise", "--external-supervisor"]
 
   model-gateway:
@@ -284,18 +341,35 @@ services:
     build:
       context: .
       dockerfile: apps/model-gateway/Dockerfile
+      args:
+        DOCKER_HUB_REGISTRY: ${DOCKER_HUB_REGISTRY:-docker.io}
     image: 1cat/model-gateway:0.1.0
+    restart: unless-stopped
     environment:
-      MODEL_API_KEY_FILE: /run/secrets/model_api_key
-    secrets: [model_api_key]
+      MODEL_API_KEY_FILE: /runtime-secrets/model_api_key
+      MODEL_GATEWAY_CLIENT_TOKEN: ${MODEL_GATEWAY_CLIENT_TOKEN:-}
+      MODEL_UPSTREAM_BASE_URL: ${MODEL_UPSTREAM_BASE_URL:-https://api.deepseek.com}
+      MODEL_UPSTREAM_MODEL_ID: ${HERMES_MODEL_ID:-deepseek-v4-pro}
+      MODEL_UPSTREAM_TIMEOUT_SECONDS: ${MODEL_UPSTREAM_TIMEOUT_SECONDS:-900}
+    volumes:
+      - ./.runtime/secrets:/runtime-secrets:ro
     networks: [agent-control, egress-uplink]
+    read_only: true
+    tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health/ready')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   egress-proxy:
     build:
       context: .
       dockerfile: infra/egress-proxy/Dockerfile
+      args:
+        DOCKER_HUB_REGISTRY: ${DOCKER_HUB_REGISTRY:-docker.io}
     image: 1cat/egress-proxy:0.1.0
     restart: unless-stopped
     networks: [model-egress, egress-uplink]
@@ -304,20 +378,81 @@ services:
 
   data-helper:
     profiles: ["maintenance"]
-    image: alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/library/alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
     volumes:
       - hermes-data:/volumes/hermes
       - minio-data:/volumes/minio
     command: ["true"]
 
-secrets:
-  model_api_key:
-    file: ./.runtime/secrets/model_api_key
+  otel-collector:
+    profiles: ["observability"]
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./infra/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      jaeger:
+        condition: service_started
+    networks: [observability]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  jaeger:
+    profiles: ["observability"]
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+    networks: [observability, edge]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  prometheus:
+    profiles: ["observability"]
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/prom/prometheus:v2.54.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    volumes:
+      - ./infra/observability/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      otel-collector:
+        condition: service_started
+    networks: [observability, edge]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  grafana:
+    profiles: ["observability"]
+    image: ${DOCKER_HUB_REGISTRY:-docker.io}/grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-onecat-observe}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks: [observability, edge]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
 
 volumes:
   postgres-data:
   minio-data:
   hermes-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   edge:
@@ -330,3 +465,5 @@ networks:
   model-egress:
     internal: true
   egress-uplink:
+  observability:
+    internal: true

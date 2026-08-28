@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -87,12 +87,109 @@ class AgentRun(Base, VersionedMixin):
     commitment_id: Mapped[str] = mapped_column(String(80), nullable=False)
     role_id: Mapped[str] = mapped_column(String(80), nullable=False)
     profile_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    execution_mode: Mapped[str | None] = mapped_column(String(20))
+    case_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    stage_key: Mapped[str | None] = mapped_column(String(60))
     status: Mapped[str] = mapped_column(String(40), default="queued", nullable=False)
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     output: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     failure: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(100), nullable=False)
     created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    current_attempt_id: Mapped[str | None] = mapped_column(String(80))
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    traceparent: Mapped[str | None] = mapped_column(String(128))
+    tracestate: Mapped[str | None] = mapped_column(String(512))
+    transition_seq: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class AgentRunAttempt(Base):
+    __tablename__ = "collaboration_agent_run_attempts"
+    __table_args__ = (UniqueConstraint("run_id", "attempt_no", name="uq_run_attempt_no"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("attempt"))
+    run_id: Mapped[str] = mapped_column(ForeignKey("collaboration_agent_runs.id"), nullable=False, index=True)
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="claimed", nullable=False)
+    worker_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    lease_token: Mapped[str] = mapped_column(String(80), nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    hermes_run_id: Mapped[str | None] = mapped_column(String(100))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    output: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    failure: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    failure_class: Mapped[str | None] = mapped_column(String(80))
+    retryability: Mapped[str] = mapped_column(String(20), default="conditional", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+
+
+class AgentRunTransition(Base):
+    __tablename__ = "collaboration_agent_run_transitions"
+    __table_args__ = (UniqueConstraint("run_id", "sequence_no", name="uq_run_transition_sequence"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("transition"))
+    run_id: Mapped[str] = mapped_column(ForeignKey("collaboration_agent_runs.id"), nullable=False, index=True)
+    attempt_id: Mapped[str | None] = mapped_column(String(80))
+    from_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    to_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason: Mapped[str] = mapped_column(String(240), nullable=False)
+    actor: Mapped[str] = mapped_column(String(160), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class MarketingCase(Base, VersionedMixin):
+    __tablename__ = "marketing_cases"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("case"))
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    target_platform: Mapped[str] = mapped_column(String(40), nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    current_stage: Mapped[str] = mapped_column(String(60), default="mo_plan", nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(100), nullable=False)
+
+
+class MarketingCaseStep(Base):
+    __tablename__ = "marketing_case_steps"
+    __table_args__ = (UniqueConstraint("case_id", "step_key", name="uq_marketing_case_step"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("case_step"))
+    case_id: Mapped[str] = mapped_column(ForeignKey("marketing_cases.id"), nullable=False, index=True)
+    step_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    commitment_id: Mapped[str | None] = mapped_column(ForeignKey("collaboration_commitments.id"))
+    active_run_id: Mapped[str | None] = mapped_column(ForeignKey("collaboration_agent_runs.id"))
+    input: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    output: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    failure: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+
+
+class MarketingCaseResource(Base):
+    __tablename__ = "marketing_case_resources"
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "resource_type", "resource_id", "relation",
+            name="uq_marketing_case_resource",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("case_ref"))
+    case_id: Mapped[str] = mapped_column(ForeignKey("marketing_cases.id"), nullable=False, index=True)
+    step_id: Mapped[str | None] = mapped_column(ForeignKey("marketing_case_steps.id"))
+    resource_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    resource_version: Mapped[int | None] = mapped_column(Integer)
+    relation: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 
 class ManualTask(Base, VersionedMixin):

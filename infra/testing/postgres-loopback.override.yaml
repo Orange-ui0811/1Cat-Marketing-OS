@@ -1,0 +1,13 @@
+# Development-only override for running the PostgreSQL integration suite from the host.
+# The production Compose topology keeps PostgreSQL on the internal data network only.
+services:
+  postgres:
+    networks:
+      - data
+      - postgres-test
+    ports:
+      - "127.0.0.1:55432:5432"
+
+networks:
+  postgres-test:
+    driver: bridge

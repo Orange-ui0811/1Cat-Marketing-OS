@@ -1,0 +1,14 @@
+apiVersion: 1
+prune: true
+datasources:
+  - name: Prometheus
+    uid: onecat-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+  - name: Jaeger
+    uid: onecat-jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
