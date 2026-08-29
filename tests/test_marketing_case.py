@@ -2,7 +2,7 @@ import uuid
 
 from app.db import SessionLocal
 from app.marketing_case import prepare_synthetic_candidates
-from app.models import AgentRun, AgentRunAttempt
+from app.models import AgentRun, AgentRunAttempt, KnowledgeItem
 from app.run_state import claim_next_run, finish_success, finish_terminal, mark_running
 
 
@@ -222,6 +222,15 @@ def test_complete_synthetic_three_agent_marketing_case(client, auth_headers):
     assert "lead:" in retrospective_run["input_text"] and "sales_feedback:" in retrospective_run["input_text"]
     case = finish_current_synthetic_run(client, auth_headers, case)
     assert case["status"] == "awaiting_human"
+    draft = case["final_deliverable"]
+    assert draft["status"] == "draft"
+    assert len(draft["markdown"]) >= 2200
+    assert {section["key"] for section in draft["document"]["sections"]} == {
+        "executive_summary", "audience_and_problem", "verified_facts",
+        "claims_and_boundaries", "campaign_strategy", "content_package",
+        "publishing_and_feedback", "measurement_and_risk", "retrospective",
+        "evidence_index",
+    }
     case = command(client, auth_headers, case, "accept_retrospective")
 
     assert case["status"] == "completed"
@@ -241,8 +250,9 @@ def test_complete_synthetic_three_agent_marketing_case(client, auth_headers):
     assert len(by_type["run"]) == 4
     assert len(by_type["commitment"]) == 4
     assert len(by_type["handoff"]) == 2
-    assert len(by_type["approval"]) == 6
+    assert len(by_type["approval"]) == 7
     assert len(by_type["knowledge"]) == 7
+    assert len(by_type["deliverable"]) == 1
     assert len(by_type["manual_task"]) == 1
     assert len(by_type["lead"]) == 1
     assert len(by_type["sales_feedback"]) == 1
@@ -251,7 +261,11 @@ def test_complete_synthetic_three_agent_marketing_case(client, auth_headers):
     }
     for approval_ref in by_type["approval"]:
         approval = approval_ref["resource"]
-        assert approval["subject_version"] == knowledge_versions[approval["subject_id"]]
+        if approval["subject_type"] == "knowledge":
+            assert approval["subject_version"] == knowledge_versions[approval["subject_id"]]
+        else:
+            assert approval["subject_type"] == "marketing_deliverable"
+            assert approval["action"] == "accept_final_deliverable"
     for knowledge_ref in by_type["knowledge"]:
         metadata = knowledge_ref["resource"]["metadata"]
         assert metadata["case_id"] == case["id"]
@@ -265,6 +279,47 @@ def test_complete_synthetic_three_agent_marketing_case(client, auth_headers):
     assert task["status"] == "simulated"
     assert task["receipt"]["external_effect"] is False
     assert task["receipt"]["case_id"] == case["id"]
+    deliverable = case["final_deliverable"]
+    assert deliverable["status"] == "accepted"
+    assert deliverable["accepted_by"] == "test-operator"
+    assert deliverable["document"]["boundary"] == case["boundary"]
+
+
+def test_short_required_artifact_blocks_instead_of_pretending_completion(client, auth_headers):
+    case = create_case(client, auth_headers).json()
+    case = command(client, auth_headers, case, "start_mo_plan")
+    step = next(item for item in case["stages"] if item["step_key"] == "mo_plan")
+    with SessionLocal.begin() as db:
+        claim = claim_next_run(db, "workflow-short-worker", 30, run_id=step["active_run_id"])
+        assert claim is not None
+        mark_running(db, claim)
+        run = db.get(AgentRun, step["active_run_id"])
+        candidate = KnowledgeItem(
+            kind="review",
+            title="占位计划",
+            body="稍后补充。",
+            source_refs=[f"synthetic://marketing-case/{case['id']}/short"],
+            metadata_json={
+                "candidate": True,
+                "case_id": case["id"],
+                "stage_key": "mo_plan",
+                "role_id": run.role_id,
+                "commitment_id": run.commitment_id,
+                "attempt_id": claim.attempt_id,
+                "execution_mode": "synthetic",
+            },
+            created_by="test-short-worker",
+            content_hash="0" * 64,
+        )
+        db.add(candidate)
+        db.flush()
+        finish_success(db, claim, {"candidate_ids": [candidate.id], "candidate_kinds": ["review"]})
+    case = client.get(f"/v1/marketing-cases/{case['id']}", headers=auth_headers).json()
+    current = next(item for item in case["stages"] if item["step_key"] == "mo_plan")
+    assert case["status"] == current["status"] == "blocked"
+    assert current["failure"]["failure_class"] == "incomplete_required_artifacts"
+    assert current["failure"]["quality_failures"]["review"] == {"minimum": 180, "actual": 5}
+    assert [item["action"] for item in case["next_actions"]] == ["retry_safe_step", "cancel_case"]
 
 
 def test_missing_required_artifacts_blocks_and_allows_human_safe_retry(client, auth_headers):
@@ -299,15 +354,81 @@ def test_failed_safe_run_can_retry_but_unknown_run_cannot(client, auth_headers):
     unknown_case = create_case(client, auth_headers).json()
     unknown_case = command(client, auth_headers, unknown_case, "start_mo_plan")
     unknown_case = finish_current_terminal(client, auth_headers, unknown_case, "unknown", "unsafe")
-    assert [item["action"] for item in unknown_case["next_actions"]] == ["cancel_case"]
+    assert [item["action"] for item in unknown_case["next_actions"]] == ["resolve_unknown", "cancel_case"]
     denied = client.post(
         f"/v1/marketing-cases/{unknown_case['id']}/commands",
         headers=write_headers(auth_headers, "unsafe-retry", unknown_case["version"]),
         json={"action": "retry_safe_step", "payload": {}},
     )
     assert denied.status_code == 409
-    unknown_case = command(client, auth_headers, unknown_case, "cancel_case")
-    assert unknown_case["status"] == "cancelled"
+    unknown_case = command(client, auth_headers, unknown_case, "resolve_unknown", {
+        "resolution": "confirmed_failed",
+        "note": "已核对外部执行记录，确认没有产生副作用。",
+        "evidence": {"source": "test-run-log"},
+    })
+    assert unknown_case["reconciliations"][0]["resolution"] == "confirmed_failed"
+    assert [item["action"] for item in unknown_case["next_actions"]] == ["retry_safe_step", "cancel_case"]
+
+
+def test_eight_page_workspace_persists_messages_decisions_and_human_hold(client, auth_headers):
+    case = create_case(client, auth_headers).json()
+    message = client.post(
+        f"/v1/marketing-cases/{case['id']}/messages",
+        headers=write_headers(auth_headers, "case-message"),
+        json={"channel": "MO", "body": "请在计划中明确人工门禁。", "intent": "change_request"},
+    )
+    assert message.status_code == 201, message.text
+    case = message.json()
+    assert case["messages"][-1]["intent"] == "change_request"
+
+    case = command(client, auth_headers, case, "start_mo_plan")
+    case = finish_current_synthetic_run(client, auth_headers, case)
+    actions = [item["action"] for item in case["next_actions"]]
+    assert "approve_mo_plan" in actions
+    assert "return_mo_plan" in actions
+    assert "hold_case" in actions
+
+    case = command(client, auth_headers, case, "hold_case", {"reason": "等待产品负责人补充边界"})
+    assert case["status"] == "blocked"
+    assert case["decisions"][-1]["decision"] == "hold"
+    assert [item["action"] for item in case["next_actions"]] == ["resume_case", "cancel_case"]
+
+    case = command(client, auth_headers, case, "resume_case", {"reason": "证据已补齐，恢复审核"})
+    assert case["status"] == "awaiting_human"
+    case = command(client, auth_headers, case, "return_mo_plan", {"reason": "重新细化验收标准"})
+    assert case["current_stage"] == "mo_plan"
+    assert case["status"] == "active"
+    assert case["decisions"][-1]["decision"] == "returned"
+    assert case["next_actions"][0]["action"] == "start_mo_plan"
+
+
+def test_agent_profile_config_is_server_versioned(client, auth_headers):
+    profiles = client.get("/v1/agent-configs", headers=auth_headers)
+    assert profiles.status_code == 200, profiles.text
+    pma = next(item for item in profiles.json() if item["agent_key"] == "PMA")
+    config = pma["config"]
+    config["model"]["timeout_seconds"] = 120
+    saved = client.put(
+        "/v1/agent-configs/PMA",
+        headers={**write_headers(auth_headers, "profile-update"), "If-Match": str(pma["version"])},
+        json={"config": config, "summary": "将 PMA 超时调整为 120 秒"},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["status"] == "draft"
+    validated = client.post(
+        "/v1/agent-configs/PMA/commands",
+        headers={**write_headers(auth_headers, "profile-validate"), "If-Match": str(saved.json()["version"])},
+        json={"action": "validate", "summary": "校验 PMA 配置"},
+    )
+    assert validated.status_code == 200, validated.text
+    published = client.post(
+        "/v1/agent-configs/PMA/commands",
+        headers={**write_headers(auth_headers, "profile-publish"), "If-Match": str(validated.json()["version"])},
+        json={"action": "publish", "summary": "发布 PMA 配置"},
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["status"] == "published"
+    assert published.json()["config"]["model"]["timeout_seconds"] == 120
 
 
 def test_running_case_cancel_waits_for_run_terminal_and_never_skips_stage(client, auth_headers):

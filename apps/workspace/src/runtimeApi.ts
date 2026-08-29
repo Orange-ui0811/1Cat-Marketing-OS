@@ -35,6 +35,8 @@ export type AgentRun = {
   commitment_id: string
   role_id: string
   profile_id: string
+  profile_version?: number | null
+  profile_snapshot?: Record<string, unknown>
   execution_mode?: 'synthetic' | 'real' | null
   case_id?: string | null
   stage_key?: string | null
@@ -92,7 +94,7 @@ export type MarketingCaseResource = {
   id: string
   case_id: string
   step_id?: string | null
-  resource_type: 'knowledge' | 'commitment' | 'run' | 'handoff' | 'approval' | 'manual_task' | 'lead' | 'sales_feedback'
+  resource_type: 'knowledge' | 'commitment' | 'run' | 'handoff' | 'approval' | 'manual_task' | 'lead' | 'sales_feedback' | 'deliverable'
   resource_id: string
   resource_version?: number | null
   relation: string
@@ -101,6 +103,92 @@ export type MarketingCaseResource = {
 }
 
 export type MarketingCaseAction = { action: string; label: string }
+
+export type MarketingCaseMessage = {
+  id: string
+  case_id: string
+  stage_key?: string | null
+  channel: 'MO' | 'PMA' | 'BGA'
+  sender_type: 'human' | 'agent' | 'system'
+  intent: 'message' | 'change_request' | 'decision_note'
+  body: string
+  attachments: Array<Record<string, unknown>>
+  created_by: string
+  created_at: string
+}
+
+export type MarketingDecision = {
+  id: string
+  case_id: string
+  stage_key: string
+  decision: string
+  reason: string
+  subject_refs: Array<{ type: string; id: string; version?: number; kind?: string }>
+  metadata: Record<string, unknown>
+  actor_id: string
+  created_at: string
+}
+
+export type MarketingReconciliation = {
+  id: string
+  case_id: string
+  step_id: string
+  run_id?: string | null
+  attempt_id?: string | null
+  resolution: string
+  note: string
+  evidence: Record<string, unknown>
+  actor_id: string
+  created_at: string
+}
+
+export type MarketingBoundary = {
+  publishing: 'simulated'
+  external_effect: false
+  pii: false
+  business_outcome_claimed: false
+}
+
+export type MarketingDeliverableSection = {
+  key: string
+  title: string
+  content: string
+  source_refs: Array<{ type: string; id: string; version?: number | null; kind?: string }>
+}
+
+export type MarketingDeliverable = {
+  id: string
+  case_id: string
+  title: string
+  status: 'draft' | 'accepted'
+  format_version: string
+  document: {
+    sections: MarketingDeliverableSection[]
+    evidence_index: Array<{ type: string; id: string; version?: number | null; relation: string }>
+    boundary: MarketingBoundary
+  }
+  markdown: string
+  source_refs: Array<{ type: string; id: string; version?: number | null; kind?: string }>
+  version: number
+  accepted_by?: string | null
+  accepted_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type MarketingDeliverableRevision = {
+  id: string
+  deliverable_id: string
+  case_id: string
+  version_no: number
+  status: 'draft' | 'accepted'
+  document: MarketingDeliverable['document']
+  markdown: string
+  source_refs: MarketingDeliverable['source_refs']
+  content_hash: string
+  created_by: string
+  created_at: string
+}
 
 export type MarketingCase = {
   id: string
@@ -116,13 +204,36 @@ export type MarketingCase = {
   updated_at: string
   stages: MarketingCaseStage[]
   resources: MarketingCaseResource[]
+  final_deliverable?: MarketingDeliverable | null
+  deliverable_history: MarketingDeliverableRevision[]
+  messages: MarketingCaseMessage[]
+  decisions: MarketingDecision[]
+  reconciliations: MarketingReconciliation[]
   next_actions: MarketingCaseAction[]
-  boundary: {
-    publishing: 'simulated'
-    external_effect: false
-    pii: false
-    business_outcome_claimed: false
-  }
+  boundary: MarketingBoundary
+}
+
+export type AgentProfileRevision = {
+  id: string
+  agent_key: 'MO' | 'PMA' | 'BGA'
+  version_no: number
+  status: 'draft' | 'validated' | 'published'
+  config: Record<string, any>
+  summary: string
+  created_by: string
+  created_at: string
+}
+
+export type AgentProfile = {
+  id: string
+  agent_key: 'MO' | 'PMA' | 'BGA'
+  status: 'draft' | 'validated' | 'published'
+  published_version: number
+  config: Record<string, any>
+  updated_by: string
+  version: number
+  updated_at: string
+  revisions: AgentProfileRevision[]
 }
 
 export type LocalModelStatus = {
@@ -235,7 +346,7 @@ export const runtimeApi = {
   getAttempts: (id: string) => request<RunAttempt[]>(`/v1/runs/${id}/attempts`),
   getTimeline: (id: string) => request<RunTransition[]>(`/v1/runs/${id}/timeline`),
   cancelRun: (id: string) => request<AgentRun>(`/v1/runs/${id}/cancel`, { method: 'POST' }, true),
-  listMarketingCases: () => request<MarketingCase[]>('/v1/marketing-cases?limit=20'),
+  listMarketingCases: (query = '') => request<MarketingCase[]>(`/v1/marketing-cases?limit=100${query ? `&${query}` : ''}`),
   getMarketingCase: (id: string) => request<MarketingCase>(`/v1/marketing-cases/${id}`),
   createMarketingCase: (input: {
     title: string
@@ -253,6 +364,18 @@ export const runtimeApi = {
       headers: { 'If-Match': String(item.version) },
       body: JSON.stringify({ action, payload }),
     }, true),
+  createMarketingCaseMessage: (item: MarketingCase, input: {
+    channel: 'MO' | 'PMA' | 'BGA'; body: string; intent?: 'message' | 'change_request' | 'decision_note'; attachments?: Array<Record<string, unknown>>
+  }) => request<MarketingCase>(`/v1/marketing-cases/${item.id}/messages`, {
+    method: 'POST', body: JSON.stringify(input),
+  }, true),
+  listAgentConfigs: () => request<AgentProfile[]>('/v1/agent-configs'),
+  updateAgentConfig: (item: AgentProfile, config: Record<string, unknown>, summary: string) => request<AgentProfile>(`/v1/agent-configs/${item.agent_key}`, {
+    method: 'PUT', headers: { 'If-Match': String(item.version) }, body: JSON.stringify({ config, summary }),
+  }, true),
+  commandAgentConfig: (item: AgentProfile, action: 'validate' | 'publish' | 'rollback', version?: number) => request<AgentProfile>(`/v1/agent-configs/${item.agent_key}/commands`, {
+    method: 'POST', headers: { 'If-Match': String(item.version) }, body: JSON.stringify({ action, version, summary: action === 'rollback' ? `恢复历史版本 ${version}` : `执行 ${action}` }),
+  }, true),
 }
 
 async function localModelRequest(options: RequestInit = {}): Promise<LocalModelStatus> {

@@ -87,6 +87,8 @@ class AgentRun(Base, VersionedMixin):
     commitment_id: Mapped[str] = mapped_column(String(80), nullable=False)
     role_id: Mapped[str] = mapped_column(String(80), nullable=False)
     profile_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    profile_version: Mapped[int | None] = mapped_column(Integer)
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     execution_mode: Mapped[str | None] = mapped_column(String(20))
     case_id: Mapped[str | None] = mapped_column(String(80), index=True)
     stage_key: Mapped[str | None] = mapped_column(String(60))
@@ -155,6 +157,38 @@ class MarketingCase(Base, VersionedMixin):
     correlation_id: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
+class MarketingDeliverable(Base, VersionedMixin):
+    __tablename__ = "marketing_case_deliverables"
+    __table_args__ = (UniqueConstraint("case_id", name="uq_marketing_deliverable_case"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("deliverable"))
+    case_id: Mapped[str] = mapped_column(ForeignKey("marketing_cases.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False)
+    format_version: Mapped[str] = mapped_column(String(40), default="marketing-plan/v1", nullable=False)
+    document_json: Mapped[dict] = mapped_column("document", JSON, default=dict, nullable=False)
+    markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    source_refs: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    accepted_by: Mapped[str | None] = mapped_column(String(120))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MarketingDeliverableRevision(Base):
+    __tablename__ = "marketing_case_deliverable_revisions"
+    __table_args__ = (UniqueConstraint("deliverable_id", "version_no", name="uq_marketing_deliverable_revision"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("deliverable_rev"))
+    deliverable_id: Mapped[str] = mapped_column(ForeignKey("marketing_case_deliverables.id"), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("marketing_cases.id"), nullable=False, index=True)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    document_json: Mapped[dict] = mapped_column("document", JSON, default=dict, nullable=False)
+    markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    source_refs: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
 class MarketingCaseStep(Base):
     __tablename__ = "marketing_case_steps"
     __table_args__ = (UniqueConstraint("case_id", "step_key", name="uq_marketing_case_step"),)
@@ -189,6 +223,70 @@ class MarketingCaseResource(Base):
     resource_id: Mapped[str] = mapped_column(String(80), nullable=False)
     resource_version: Mapped[int | None] = mapped_column(Integer)
     relation: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class MarketingCaseMessage(Base):
+    __tablename__ = "marketing_case_messages"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("case_msg"))
+    case_id: Mapped[str] = mapped_column(ForeignKey("marketing_cases.id"), nullable=False, index=True)
+    stage_key: Mapped[str | None] = mapped_column(String(60))
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    sender_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    intent: Mapped[str] = mapped_column(String(40), default="message", nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    attachments: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class MarketingDecision(Base):
+    __tablename__ = "marketing_case_decisions"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("case_decision"))
+    case_id: Mapped[str] = mapped_column(ForeignKey("marketing_cases.id"), nullable=False, index=True)
+    stage_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    decision: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_refs: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict, nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class MarketingReconciliation(Base):
+    __tablename__ = "marketing_case_reconciliations"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("reconcile"))
+    case_id: Mapped[str] = mapped_column(ForeignKey("marketing_cases.id"), nullable=False, index=True)
+    step_id: Mapped[str] = mapped_column(ForeignKey("marketing_case_steps.id"), nullable=False)
+    run_id: Mapped[str | None] = mapped_column(String(80))
+    attempt_id: Mapped[str | None] = mapped_column(String(80))
+    resolution: Mapped[str] = mapped_column(String(40), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class AgentProfileConfig(Base, VersionedMixin):
+    __tablename__ = "agent_profile_configs"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    agent_key: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="published", nullable=False)
+    published_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    config_json: Mapped[dict] = mapped_column("config", JSON, default=dict, nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(120), nullable=False)
+
+
+class AgentProfileRevision(Base):
+    __tablename__ = "agent_profile_revisions"
+    __table_args__ = (UniqueConstraint("agent_key", "version_no", name="uq_agent_profile_revision"),)
+    id: Mapped[str] = mapped_column(String(80), primary_key=True, default=lambda: new_id("profile_rev"))
+    agent_key: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    config_json: Mapped[dict] = mapped_column("config", JSON, default=dict, nullable=False)
+    summary: Mapped[str] = mapped_column(String(240), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 

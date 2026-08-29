@@ -468,6 +468,8 @@ async def execute_hermes(claim: AttemptClaim) -> None:
         mark_running(db, claim)
         attempt = db.get(AgentRunAttempt, claim.attempt_id)
         profile_id, input_text = run.profile_id, run.input_text
+        profile_snapshot = dict(run.profile_snapshot or {})
+        profile_version = run.profile_version
         commitment_id = run.commitment_id
     url, key = PROFILE[profile_id]
     headers = {"Authorization": f"Bearer {key}"}
@@ -479,7 +481,13 @@ async def execute_hermes(claim: AttemptClaim) -> None:
     terminal_status = "unknown"
     hermes_run_id = None
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        configured_timeout = int(profile_snapshot.get("model", {}).get("timeout_seconds", 60) or 60)
+        configured_timeout = max(10, min(configured_timeout, 600))
+        profile_note = (
+            f"\n本次Run绑定服务端Profile版本={profile_version or 'legacy'}；"
+            f"配置超时={configured_timeout}秒。运行中配置变更不会覆盖本次快照。"
+        )
+        async with httpx.AsyncClient(timeout=configured_timeout) as client:
             def persist_external_starting() -> None:
                 with SessionLocal.begin() as db:
                     mark_external_starting(db, claim)
@@ -492,7 +500,7 @@ async def execute_hermes(claim: AttemptClaim) -> None:
             )
             response = await client.post(f"{url}/v1/runs", headers=headers, json={
                 "input": input_text,
-                "instructions": profile_instructions(profile_id, commitment_id, claim.attempt_id),
+                "instructions": profile_instructions(profile_id, commitment_id, claim.attempt_id) + profile_note,
                 "session_id": claim.run_id,
             })
             response.raise_for_status()

@@ -85,6 +85,8 @@ MarketingCaseAction = Literal[
     "start_mo_plan", "approve_mo_plan", "start_pma", "approve_product",
     "start_bga", "approve_content", "record_simulated_publish",
     "record_synthetic_feedback", "start_mo_retrospective", "accept_retrospective",
+    "return_mo_plan", "return_product", "return_content", "return_retrospective",
+    "hold_case", "takeover_case", "resume_case", "resolve_unknown",
     "retry_safe_step", "cancel_case",
 ]
 
@@ -92,6 +94,25 @@ MarketingCaseAction = Literal[
 class MarketingCaseCommand(BaseModel):
     action: MarketingCaseAction
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class MarketingCaseMessageCreate(BaseModel):
+    channel: Literal["MO", "PMA", "BGA"] = "MO"
+    body: str = Field(min_length=1, max_length=8000)
+    stage_key: str | None = Field(default=None, max_length=60)
+    intent: Literal["message", "change_request", "decision_note"] = "message"
+    attachments: list[dict[str, Any]] = Field(default_factory=list, max_length=5)
+
+
+class AgentProfileUpdate(BaseModel):
+    config: dict[str, Any]
+    summary: str = Field(default="更新岗位配置草稿", min_length=2, max_length=240)
+
+
+class AgentProfileCommand(BaseModel):
+    action: Literal["validate", "publish", "rollback"]
+    version: int | None = Field(default=None, ge=1)
+    summary: str = Field(default="配置状态变更", min_length=2, max_length=240)
 
 
 class LeadStubCreate(BaseModel):

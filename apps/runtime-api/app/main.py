@@ -4,15 +4,15 @@ import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import inspect, select, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .db import engine, get_db
 from .models import (
-    AgentRun, AgentRunAttempt, AgentRunTransition, Approval, AuditLog, Commitment,
+    AgentProfileConfig, AgentProfileRevision, AgentRun, AgentRunAttempt, AgentRunTransition, Approval, AuditLog, Commitment,
     Handoff, KnowledgeItem, LeadStub, ManualTask, MemoryEntry, OrganizationEvent,
-    MarketingCase, Outbox, Role, SalesFeedback,
+    MarketingCase, MarketingCaseMessage, Outbox, Role, SalesFeedback,
 )
 from .policy import canonical_hash, find_idempotent, prepare_write, record_write
 from .observability import configure_observability, current_trace_headers, metrics
@@ -22,13 +22,15 @@ from .model_admin import (
 from .schemas import (
     ApprovalCreate, CommitmentCreate, CommitmentTransition, EventCreate, HandoffCreate,
     KnowledgeCreate, LeadStubCreate, ManualTaskCreate, ManualTaskReceipt,
-    MarketingCaseCommand, MarketingCaseCreate, MemoryCreate, RunCreate, SalesFeedbackCreate,
+    AgentProfileCommand, AgentProfileUpdate, MarketingCaseCommand, MarketingCaseCreate,
+    MarketingCaseMessageCreate, MemoryCreate, RunCreate, SalesFeedbackCreate,
 )
 from .security import Actor, current_actor, require_any
 from .run_state import append_transition, request_cancellation
 from .marketing_case import (
     MarketingCaseConflict, case_snapshot, create_marketing_case, execute_case_command,
 )
+from .workspace_ops import AGENTS, ensure_agent_profiles, profile_snapshot
 
 
 ROLE_SEEDS = [
@@ -53,6 +55,7 @@ async def lifespan(_: FastAPI):
                 }
                 db.add(Role(id=role_id, name=name, profile_id=profile, owner_role=owner,
                             lifecycle="onboarding", manifest=manifest, content_hash=canonical_hash(manifest)))
+        ensure_agent_profiles(db)
         db.commit()
     yield
 
@@ -428,10 +431,18 @@ def create_memory(payload: MemoryCreate, actor: Actor = Depends(current_actor), 
 @app.get("/v1/marketing-cases")
 def list_marketing_cases(
     limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status: str | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=120),
     _: Actor = Depends(current_actor),
     db: Session = Depends(get_db),
 ):
-    items = db.scalars(select(MarketingCase).order_by(MarketingCase.created_at.desc()).limit(limit)).all()
+    stmt = select(MarketingCase)
+    if status:
+        stmt = stmt.where(MarketingCase.status == status)
+    if q:
+        stmt = stmt.where(MarketingCase.title.ilike(f"%{q.strip()}%"))
+    items = db.scalars(stmt.order_by(MarketingCase.created_at.desc()).offset(offset).limit(limit)).all()
     return [{**as_dict(item), "next_actions": case_snapshot(db, item)["next_actions"]} for item in items]
 
 
@@ -472,6 +483,41 @@ def create_marketing_case_route(
         "status": item.status,
         "operation": "marketing_case.create",
     })
+    return case_snapshot(db, item)
+
+
+@app.post("/v1/marketing-cases/{item_id}/messages", status_code=201)
+def create_marketing_case_message(
+    item_id: str,
+    payload: MarketingCaseMessageCreate,
+    actor: Actor = Depends(current_actor),
+    hs=Depends(headers),
+    db: Session = Depends(get_db),
+):
+    require_any(actor, "company_admin", "operator", "product_marketing_owner", "brand_growth_owner", "sales_owner")
+    item = db.get(MarketingCase, item_id)
+    if not item:
+        raise HTTPException(404, "Marketing Case不存在")
+    command_body = {"case_id": item_id, **payload.model_dump()}
+    ctx = prepare_write(actor, *hs, command_body)
+    if old := find_idempotent(db, ctx):
+        old_case = db.get(MarketingCase, old.resource_id)
+        return case_snapshot(db, old_case) if old_case else case_snapshot(db, item)
+    message = MarketingCaseMessage(
+        case_id=item.id,
+        stage_key=payload.stage_key or item.current_stage,
+        channel=payload.channel,
+        sender_type="human",
+        intent=payload.intent,
+        body=payload.body.strip(),
+        attachments=payload.attachments,
+        created_by=actor.id,
+    )
+    db.add(message)
+    item.version += 1
+    item.content_hash = canonical_hash({"previous": item.content_hash, "message": payload.model_dump()})
+    record_write(db, ctx, "marketing_case", item.id, "marketing_case.message.create")
+    db.commit(); db.refresh(item)
     return case_snapshot(db, item)
 
 
@@ -565,6 +611,136 @@ def command_marketing_case(
         "outcome": "completed",
     })
     return case_snapshot(db, item)
+
+
+@app.get("/v1/agent-configs")
+def list_agent_configs(_: Actor = Depends(current_actor), db: Session = Depends(get_db)):
+    items = db.scalars(select(AgentProfileConfig).order_by(AgentProfileConfig.agent_key)).all()
+    return [profile_snapshot(db, item) for item in items]
+
+
+@app.put("/v1/agent-configs/{agent_key}")
+def update_agent_config(
+    agent_key: str,
+    payload: AgentProfileUpdate,
+    actor: Actor = Depends(current_actor),
+    hs=Depends(headers),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    db: Session = Depends(get_db),
+):
+    require_any(actor, "company_admin", "operator")
+    key = agent_key.upper()
+    if key not in AGENTS:
+        raise HTTPException(404, "Agent配置不存在")
+    item = db.scalar(select(AgentProfileConfig).where(AgentProfileConfig.agent_key == key))
+    if not item:
+        raise HTTPException(404, "Agent配置不存在")
+    if if_match is None:
+        raise HTTPException(428, "Agent配置更新必须携带If-Match")
+    try:
+        expected_version = int(if_match.strip('"'))
+    except ValueError as exc:
+        raise HTTPException(400, "If-Match必须是配置版本号") from exc
+    if expected_version != item.version:
+        raise HTTPException(412, f"Agent配置版本已变化：当前为{item.version}")
+    body = {"agent_key": key, "expected_version": expected_version, **payload.model_dump()}
+    ctx = prepare_write(actor, *hs, body)
+    if old := find_idempotent(db, ctx):
+        existing = db.get(AgentProfileConfig, old.resource_id)
+        return profile_snapshot(db, existing or item)
+    next_revision = int(db.scalar(select(func.max(AgentProfileRevision.version_no)).where(
+        AgentProfileRevision.agent_key == key,
+    )) or 0) + 1
+    item.config_json = payload.config
+    item.status = "draft"
+    item.updated_by = actor.id
+    item.version += 1
+    item.content_hash = canonical_hash(payload.config)
+    db.add(AgentProfileRevision(
+        agent_key=key,
+        version_no=next_revision,
+        status="draft",
+        config_json=payload.config,
+        summary=payload.summary,
+        created_by=actor.id,
+    ))
+    record_write(db, ctx, "agent_profile_config", item.id, "agent_profile_config.update")
+    db.commit(); db.refresh(item)
+    return profile_snapshot(db, item)
+
+
+@app.post("/v1/agent-configs/{agent_key}/commands")
+def command_agent_config(
+    agent_key: str,
+    payload: AgentProfileCommand,
+    actor: Actor = Depends(current_actor),
+    hs=Depends(headers),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+    db: Session = Depends(get_db),
+):
+    require_any(actor, "company_admin", "operator")
+    key = agent_key.upper()
+    item = db.scalar(select(AgentProfileConfig).where(AgentProfileConfig.agent_key == key))
+    if not item:
+        raise HTTPException(404, "Agent配置不存在")
+    if if_match is None:
+        raise HTTPException(428, "Agent配置命令必须携带If-Match")
+    try:
+        expected_version = int(if_match.strip('"'))
+    except ValueError as exc:
+        raise HTTPException(400, "If-Match必须是配置版本号") from exc
+    if expected_version != item.version:
+        raise HTTPException(412, f"Agent配置版本已变化：当前为{item.version}")
+    body = {"agent_key": key, "expected_version": expected_version, **payload.model_dump()}
+    ctx = prepare_write(actor, *hs, body)
+    if old := find_idempotent(db, ctx):
+        existing = db.get(AgentProfileConfig, old.resource_id)
+        return profile_snapshot(db, existing or item)
+    latest = db.scalar(select(AgentProfileRevision).where(
+        AgentProfileRevision.agent_key == key,
+    ).order_by(AgentProfileRevision.version_no.desc()))
+    if payload.action == "validate":
+        config = item.config_json
+        missing = [field for field in ("model", "permissions", "six_pack", "skills") if not config.get(field)]
+        if missing or len(config.get("six_pack", [])) < 6 or len(config.get("skills", [])) < 1:
+            raise HTTPException(409, f"配置校验失败：缺少或不完整 {','.join(missing or ['six_pack/skills'])}")
+        item.status = "validated"
+        if latest:
+            latest.status = "validated"
+    elif payload.action == "publish":
+        if item.status != "validated" or not latest:
+            raise HTTPException(409, "只有通过校验的草稿可以发布")
+        item.status = "published"
+        item.published_version = latest.version_no
+        latest.status = "published"
+    else:
+        if payload.version is None:
+            raise HTTPException(422, "回滚必须指定历史版本")
+        target = db.scalar(select(AgentProfileRevision).where(
+            AgentProfileRevision.agent_key == key,
+            AgentProfileRevision.version_no == payload.version,
+        ))
+        if not target:
+            raise HTTPException(404, "指定的配置历史版本不存在")
+        next_revision = int(db.scalar(select(func.max(AgentProfileRevision.version_no)).where(
+            AgentProfileRevision.agent_key == key,
+        )) or 0) + 1
+        item.config_json = target.config_json
+        item.status = "draft"
+        db.add(AgentProfileRevision(
+            agent_key=key,
+            version_no=next_revision,
+            status="draft",
+            config_json=target.config_json,
+            summary=payload.summary,
+            created_by=actor.id,
+        ))
+    item.updated_by = actor.id
+    item.version += 1
+    item.content_hash = canonical_hash({"config": item.config_json, "status": item.status, "version": item.version})
+    record_write(db, ctx, "agent_profile_config", item.id, f"agent_profile_config.{payload.action}")
+    db.commit(); db.refresh(item)
+    return profile_snapshot(db, item)
 
 
 @app.get("/v1/audit")

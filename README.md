@@ -18,8 +18,8 @@ R0 只生成候选、协作、审核和人工发布任务。抖音、小红书�
 ./bin/1cat e2e
 ```
 
-打开 <http://localhost:8080>。这里直接交付完整 Demo1 工作台；三 Agent 完整流程位于
-<http://localhost:8080/?view=workflow>，PMA Runtime 研修页位于
+打开 <http://localhost:8080>。这里直接交付由服务端驱动的八类工作台；三 Agent 完整流程
+分布在任务、协作、对象、决策、异常、Daily、Agent 配置和运行诊断八个页面中。PMA Runtime 研修页位于
 <http://localhost:8080/?view=runtime>。首次登录用户为 `admin`，密码在
 初始化后写入 `.env` 的 `INITIAL_ADMIN_PASSWORD`；不要复制到文档、日志或部署包。
 
@@ -58,7 +58,7 @@ Hermes、Commitment 终态以及实际写入的候选对象类型：
 ```text
 Brief → MO 规划 → 人工确认 → PMA Fact/Claim → 人工产品审核
 → BGA Campaign/Content → 人工内容审核 → simulated 发布
-→ 合成 Lead/销售反馈 → MO 复盘 → 人工确认完成
+→ 合成 Lead/销售反馈 → MO 复盘 → 生成完整营销方案 → 人工确认完成
 ```
 
 默认合成模式不调用模型，可确定性复现；真实模式会调用 DeepSeek 并产生费用，必须显式选择：
@@ -68,9 +68,25 @@ Brief → MO 规划 → 人工确认 → PMA Fact/Claim → 人工产品审核
 .venv/Scripts/python.exe scripts/marketing_workflow_demo.py --mode real
 ```
 
-验收会保存 Case、阶段、Run、Attempt、Trace、候选、审批、Handoff、模拟回执和反馈证据。
+验收会保存 Case、阶段、Run、Attempt、Trace、候选、审批、Handoff、模拟回执、反馈和最终方案证据。
+最终方案是独立、版本化的 `MarketingDeliverable`，包含 10 个结构化章节、证据索引与可下载
+Markdown；最后一次人工确认会批准该方案的明确版本。Agent 只返回占位短文、缺少必需对象或
+方案章节不完整时，Case 会进入 `blocked`，不会被标记为完成。
 若安全失败停在 `retry_safe_step`，由人类确认后可增加 `--case-id <id> --allow-safe-retry`
 继续；旧 Run/Attempt 不会被覆盖。发布回执固定声明 `external_effect=false`，系统不访问真实平台。
+
+### 八类页面如何分工
+
+- **任务中心**：新建 Brief、启动 MO/PMA/BGA、完成模拟人工发布、登记合成反馈。
+- **协作中心**：围绕当前 Case 留言，查看 Commitment 与 Handoff 的服务端记录。
+- **业务对象**：查看 Fact、Claim、Campaign、完整内容母稿和 10 章 FINAL DELIVERABLE；切换历史案例并下载 Markdown。
+- **决策台账**：审阅对象版本，批准、退回修改、HOLD 或人工接管，并保留正式理由。
+- **异常处置**：查看失败事实，执行安全重试、暂停恢复、Unknown 人工对账或取消。
+- **Daily Brief**：按待人工、运行中、异常、已完成聚合全部服务端案例。
+- **Agent 配置**：维护 PMA/BGA/MO 的服务端 Profile 草稿，校验、发布和回滚版本。
+- **运行诊断**：按 Case 查看 Run、Attempt、Lease、Heartbeat、状态时间线与 Trace。
+
+`/?view=workflow` 只保留为兼容入口，并会进入同一套八类服务端工作台；它不再是完成流程所必需的页面。
 
 Windows 请使用 Docker Desktop Linux containers + Git Bash；完整步骤见 `docs/deployment/Windows开发运行手册.md`。
 
@@ -148,7 +164,7 @@ Runtime 页面统一。`D:\媒体架构\demo1\demo1` 只保留为 4173 开发镜
 - Prometheus：<http://localhost:9090>
 - Grafana：<http://localhost:3000>（默认 `admin / onecat-observe`，可在 `.env` 修改）
 
-`http://127.0.0.1:8080/?view=workflow` 可从每个 Agent 阶段查看 Run/Attempt/Trace，
+八类工作台的“运行诊断”可查看每个 Agent 阶段的 Run/Attempt/Trace，
 `/?view=runtime` 继续保留 PMA 研修页。Grafana v4 共 20 个面板，含 Marketing Workflow、
 队列/租约/恢复、MCP 和数据库不可用区域。可以创建一条新的真实 PMA Run并自动核对 Trace、
 指标、结构化日志与时间线：

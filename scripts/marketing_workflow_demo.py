@@ -190,6 +190,7 @@ def collect_evidence(client: Client, case: dict[str, Any], elapsed: float) -> di
         knowledge_kinds[item["kind"]] = knowledge_kinds.get(item["kind"], 0) + 1
     manual_tasks = grouped.get("manual_task", [])
     commitments = grouped.get("commitment", [])
+    deliverable = case.get("final_deliverable")
     evidence = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "elapsed_seconds": round(elapsed, 1),
@@ -211,6 +212,15 @@ def collect_evidence(client: Client, case: dict[str, Any], elapsed: float) -> di
             "manual_receipts": [item.get("receipt") for item in manual_tasks],
             "lead_count": len(grouped.get("lead", [])),
             "sales_feedback_count": len(grouped.get("sales_feedback", [])),
+            "deliverable": {
+                "id": deliverable.get("id"),
+                "status": deliverable.get("status"),
+                "version": deliverable.get("version"),
+                "section_keys": [
+                    section.get("key") for section in deliverable.get("document", {}).get("sections", [])
+                ],
+                "markdown_characters": len(deliverable.get("markdown", "")),
+            } if deliverable else None,
             "boundary": case.get("boundary"),
         },
     }
@@ -229,13 +239,16 @@ def assert_evidence(evidence: dict[str, Any], *, allow_safe_retry: bool = False)
     assert set(summary["run_statuses"]) == {"evidence_accepted"}, summary
     assert set(summary["commitment_statuses"]) == {"fulfilled"}, summary
     assert summary["handoff_count"] == 2, summary
-    assert summary["approval_count"] >= 6, summary
+    assert summary["approval_count"] >= 7, summary
     assert summary["lead_count"] == 1 and summary["sales_feedback_count"] == 1, summary
     assert summary["knowledge_kinds"].get("review", 0) >= 2, summary
     assert summary["knowledge_kinds"].get("fact", 0) >= 1, summary
     assert summary["knowledge_kinds"].get("claim", 0) >= 1, summary
     assert summary["knowledge_kinds"].get("campaign", 0) >= 1, summary
     assert summary["knowledge_kinds"].get("content", 0) >= 1, summary
+    assert summary["deliverable"] and summary["deliverable"]["status"] == "accepted", summary
+    assert len(summary["deliverable"]["section_keys"]) == 10, summary
+    assert summary["deliverable"]["markdown_characters"] >= 2200, summary
     assert all(receipt.get("external_effect") is False for receipt in summary["manual_receipts"]), summary
     assert summary["boundary"] == {
         "publishing": "simulated",

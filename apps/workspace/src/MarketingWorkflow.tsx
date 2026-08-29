@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Activity, AlertTriangle, ArrowLeft, Bot, Check, CheckCircle2, Clock3, ExternalLink,
-  FileCheck2, GitBranch, History, LogOut, Play, RefreshCw, ShieldCheck, UserCheck,
+  Download, FileCheck2, FileText, GitBranch, History, LogOut, Play, RefreshCw, ShieldCheck, UserCheck,
 } from 'lucide-react'
 import {
   AgentRun, MarketingCase, MarketingCaseResource, RunAttempt, RunTransition,
@@ -24,7 +24,7 @@ const STAGE_STATUS_LABELS: Record<string, string> = {
 }
 const RESOURCE_LABELS: Record<string, string> = {
   commitment: '岗位承诺', handoff: '岗位交接', approval: '人工审批', knowledge: '知识候选',
-  manual_task: '人工发布任务', lead: '合成 Lead', sales_feedback: '销售反馈',
+  manual_task: '人工发布任务', lead: '合成 Lead', sales_feedback: '销售反馈', deliverable: '最终营销方案',
 }
 
 type RunEvidence = { run: AgentRun; attempts: RunAttempt[]; timeline: RunTransition[] }
@@ -153,6 +153,44 @@ function ResourceCard({ ref }: { ref: MarketingCaseResource }) {
   </article>
 }
 
+function FinalDeliverablePanel({ item }: { item: MarketingCase }) {
+  const deliverable = item.final_deliverable
+  if (!deliverable) return null
+  const sections = deliverable.document?.sections || []
+  const downloadMarkdown = () => {
+    const blob = new Blob([deliverable.markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${item.title.replace(/[\\/:*?"<>|]/g, '-')}-完整营销方案.md`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+  return <article className="workflow-card workflow-deliverable">
+    <header>
+      <div><span>FINAL DELIVERABLE</span><h2><FileText size={18} />{deliverable.title}</h2></div>
+      <div className="workflow-deliverable-actions">
+        <span className={`deliverable-status ${deliverable.status}`}>{deliverable.status === 'accepted' ? '人工已确认' : '等待人工确认'}</span>
+        <button onClick={downloadMarkdown}><Download size={14} />下载 Markdown</button>
+      </div>
+    </header>
+    <p className="workflow-deliverable-meta">
+      {deliverable.format_version} · v{deliverable.version} · {sections.length} 个章节 · {deliverable.source_refs.length} 个知识来源
+      {deliverable.accepted_at ? ` · ${formatTime(deliverable.accepted_at)} 确认` : ''}
+    </p>
+    <nav>{sections.map((section, index) => <a key={section.key} href={`#deliverable-${section.key}`}>{index + 1}. {section.title}</a>)}</nav>
+    <div className="workflow-document">
+      {sections.map((section, index) => <section key={section.key} id={`deliverable-${section.key}`}>
+        <span>{String(index + 1).padStart(2, '0')}</span>
+        <div><h3>{section.title}</h3><p>{section.content}</p>
+          {section.source_refs?.length > 0 && <small>来源 · {section.source_refs.map(ref => `${ref.kind || ref.type}:${ref.id.slice(0, 10)}@v${ref.version || '-'}`).join(' · ')}</small>}
+        </div>
+      </section>)}
+    </div>
+    <footer><ShieldCheck size={14} />方案已持久化并可追溯；发布 simulated，external_effect=false。</footer>
+  </article>
+}
+
 function CaseWorkspace({ initial, onLogout, onNew }: { initial: MarketingCase; onLogout: () => void; onNew: () => void }) {
   const [item, setItem] = useState(initial)
   const [recent, setRecent] = useState<MarketingCase[]>([])
@@ -261,6 +299,8 @@ function CaseWorkspace({ initial, onLogout, onNew }: { initial: MarketingCase; o
           </div>
         </article>
 
+        <FinalDeliverablePanel item={item} />
+
         {Object.entries(evidence).map(([runId, value]) => <article className="workflow-card workflow-run" key={runId}>
           <header><div><span>{value.run.profile_id.toUpperCase()} RUN</span><strong>{value.run.status}</strong></div>
             {value.run.trace_id && <a href={`${JAEGER_URL}/trace/${value.run.trace_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} />Trace</a>}
@@ -275,13 +315,13 @@ function CaseWorkspace({ initial, onLogout, onNew }: { initial: MarketingCase; o
         </article>)}
 
         {item.status === 'completed' && <article className="workflow-complete">
-          <CheckCircle2 size={28} /><div><h2>技术链路已完成</h2><p>{item.execution_mode === 'real' ? '本次真实 DeepSeek Agent 技术链路已完成' : '本次合成业务案例已完成'}。发布回执为 <strong>simulated</strong>，未访问真实内容平台，也不代表真实营销效果。</p></div>
+          <CheckCircle2 size={28} /><div><h2>完整方案已确认，技术链路已完成</h2><p>{item.execution_mode === 'real' ? '本次真实 DeepSeek Agent 技术链路与最终方案已由人确认' : '本次合成业务案例及最终方案已完成'}。发布回执为 <strong>simulated</strong>，未访问真实内容平台，也不代表真实营销效果。</p></div>
         </article>}
       </section>
 
       <aside className="workflow-card workflow-evidence">
         <div className="workflow-section-title"><span>03</span><h2>服务端事实</h2></div>
-        {(['commitment', 'handoff', 'approval', 'knowledge', 'manual_task', 'lead', 'sales_feedback'] as const).map(kind => grouped[kind]?.length ? <details key={kind} open={['commitment', 'knowledge', 'manual_task'].includes(kind)}>
+        {(['commitment', 'handoff', 'approval', 'knowledge', 'deliverable', 'manual_task', 'lead', 'sales_feedback'] as const).map(kind => grouped[kind]?.length ? <details key={kind} open={['commitment', 'knowledge', 'deliverable', 'manual_task'].includes(kind)}>
           <summary>{RESOURCE_LABELS[kind] || kind}<span>{grouped[kind].length}</span></summary>
           <div>{grouped[kind].map(ref => <ResourceCard key={ref.id} ref={ref} />)}</div>
         </details> : null)}
