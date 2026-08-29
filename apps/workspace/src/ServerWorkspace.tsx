@@ -12,8 +12,7 @@ import {
   localModelAdmin,
 } from './runtimeApi'
 import { RuntimeWorkspaceProvider, useRuntimeWorkspace, type RunEvidence } from './RuntimeWorkspaceContext'
-
-type ViewKey = 'tasks' | 'collaboration' | 'objects' | 'reviews' | 'holds' | 'daily' | 'agent_config' | 'diagnostics'
+import type { ViewKey } from './types'
 
 const NAV: Array<{ key: ViewKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: 'tasks', label: '任务中心', icon: LayoutDashboard },
@@ -266,6 +265,24 @@ function DiagnosticsPage() {
   return <section className="server-page"><PageTitle eyebrow="RUNTIME OBSERVABILITY" title="运行诊断" body="查看真实 Run、Attempt、Lease、Heartbeat、状态迁移和 Trace。" /><div className="server-diagnostic-summary"><article><Activity size={18} /><span>Runtime</span><strong>已连接</strong><small>{current?.correlation_id || '尚无当前案例'}</small></article><article><Bot size={18} /><span>模型</span><strong>{model?.model || '未读取'}</strong><small>{model?.execution_enabled ? '真实执行可用' : '仅合成执行'}</small></article><article><GitBranch size={18} /><span>Runs</span><strong>{runRefs.length}</strong><small>{loading ? '正在读取证据' : 'Attempt 与 Timeline 已加载'}</small></article><article><ShieldCheck size={18} /><span>发布边界</span><strong>SIMULATED</strong><small>external_effect=false</small></article></div>{Object.values(evidence).map(value => <article className="server-run" key={value.run.id}><header><div><span>{String(value.run.profile_id).toUpperCase()} · {STAGE_LABELS[value.run.stage_key || '']}</span><h2>{value.run.id}</h2></div><StatusPill value={value.run.status} />{value.run.trace_id && <a href={`http://127.0.0.1:16686/trace/${value.run.trace_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} />打开 Trace</a>}</header><dl><div><dt>Correlation</dt><dd>{value.run.correlation_id}</dd></div><div><dt>Execution</dt><dd>{value.run.execution_mode}</dd></div><div><dt>Started</dt><dd>{dateTime(value.run.started_at)}</dd></div><div><dt>Completed</dt><dd>{dateTime(value.run.completed_at)}</dd></div></dl><div className="server-run-timeline">{value.timeline.map(event => <span key={event.id}><i /><strong>{event.to_status}</strong><small>{dateTime(event.created_at)}</small></span>)}</div><details open><summary>Attempt 历史 <span>{value.attempts.length}</span></summary>{value.attempts.map(attempt => <article className="server-attempt" key={attempt.id}><header><strong>Attempt {attempt.attempt_no}</strong><StatusPill value={attempt.status} /></header><dl><div><dt>Worker</dt><dd>{attempt.worker_id}</dd></div><div><dt>Heartbeat</dt><dd>{dateTime(attempt.heartbeat_at)}</dd></div><div><dt>Lease until</dt><dd>{dateTime(attempt.lease_until)}</dd></div><div><dt>Retryability</dt><dd>{attempt.retryability}</dd></div></dl>{(attempt.failure_class || Object.keys(attempt.failure || {}).length > 0) && <pre>{JSON.stringify({ failure_class: attempt.failure_class, ...attempt.failure }, null, 2)}</pre>}</article>)}</details></article>)}{!runRefs.length && <Empty title="当前案例还没有 Run" body="在任务中心启动 MO/PMA/BGA 后，执行证据会显示在这里。" />}</section>
 }
 
+export function ServerWorkspacePage({ view, navigate }: { view: ViewKey; navigate: (view: ViewKey) => void }) {
+  const { authenticated } = useRuntimeWorkspace()
+  const [createOpen, setCreateOpen] = useState(false)
+  if (!authenticated) return <div className="server-embedded-login"><Login /></div>
+  return <div className="server-embedded-workspace">
+    <GlobalCaseBar onNew={() => setCreateOpen(true)} />
+    {view === 'tasks' && <TaskPage onNew={() => setCreateOpen(true)} navigate={navigate} />}
+    {view === 'collaboration' && <CollaborationPage />}
+    {view === 'objects' && <ObjectsPage />}
+    {view === 'reviews' && <ReviewsPage />}
+    {view === 'holds' && <HoldsPage />}
+    {view === 'daily' && <DailyPage navigate={navigate} />}
+    {view === 'agent_config' && <AgentConfigPage />}
+    {view === 'diagnostics' && <DiagnosticsPage />}
+    <CreateCaseDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+  </div>
+}
+
 function Shell() {
   const { authenticated, current } = useRuntimeWorkspace()
   const rawView = new URLSearchParams(window.location.search).get('view')
@@ -279,7 +296,7 @@ function Shell() {
     const url = new URL(window.location.href); url.searchParams.set('view', next); window.history.replaceState({}, '', url)
   }
   const pending = current?.status === 'awaiting_human' || current?.status === 'blocked' ? 1 : 0
-  return <div className="app-shell server-workspace"><button className="server-mobile-menu" onClick={() => setMobile(true)}><Menu size={18} /></button>{mobile && <button className="nav-scrim" onClick={() => setMobile(false)} />}<aside className={`sidebar ${mobile ? 'sidebar-open' : ''}`}><header className="brand-block"><div className="brand-mark"><span>S2</span></div><div><strong>营销组织运行台</strong><small>server-backed workspace</small></div><button className="icon-button sidebar-close" onClick={() => setMobile(false)}><X size={17} /></button></header><div className="environment-note"><Activity size={14} /><div><strong>真实 Runtime</strong><small>八类页面统一服务端状态</small></div></div><nav className="main-nav"><p>工作台</p>{NAV.map(item => { const Icon = item.icon; return <button key={item.key} className={view === item.key ? 'active' : ''} onClick={() => navigate(item.key)}><Icon size={18} /><span>{item.label}</span>{item.key === 'tasks' && pending > 0 && <em>{pending}</em>}</button> })}</nav><footer className="sidebar-footer"><button onClick={() => setCreateOpen(true)}><Plus size={16} /><span>建立新营销任务</span></button><div className="boundary-line"><ShieldCheck size={14} /><span>平台发布 simulated · 人类最终决策</span></div></footer></aside><div className="main-area"><header className="server-topbar"><div><span>1Cat Marketing OS</span><ChevronRight size={13} /><strong>{NAV.find(item => item.key === view)?.label}</strong></div><span className="server-truth-badge"><Database size={13} />SERVER SOURCE OF TRUTH</span></header><main className="main-content server-main"><GlobalCaseBar onNew={() => setCreateOpen(true)} />{view === 'tasks' && <TaskPage onNew={() => setCreateOpen(true)} navigate={navigate} />}{view === 'collaboration' && <CollaborationPage />}{view === 'objects' && <ObjectsPage />}{view === 'reviews' && <ReviewsPage />}{view === 'holds' && <HoldsPage />}{view === 'daily' && <DailyPage navigate={navigate} />}{view === 'agent_config' && <AgentConfigPage />}{view === 'diagnostics' && <DiagnosticsPage />}</main></div><CreateCaseDialog open={createOpen} onClose={() => setCreateOpen(false)} /></div>
+  return <div className="app-shell server-workspace"><button className="server-mobile-menu" onClick={() => setMobile(true)}><Menu size={18} /></button>{mobile && <button className="nav-scrim" onClick={() => setMobile(false)} />}<aside className={`sidebar ${mobile ? 'sidebar-open' : ''}`}><header className="brand-block"><div className="brand-mark"><span>S2</span></div><div><strong>营销组织运行台</strong><small>server-backed workspace</small></div><button className="icon-button sidebar-close" onClick={() => setMobile(false)}><X size={17} /></button></header><div className="environment-note"><Activity size={14} /><div><strong>真实 Runtime</strong><small>八类页面统一服务端状态</small></div></div><nav className="main-nav"><p>工作台</p>{NAV.map(item => { const Icon = item.icon; return <button key={item.key} className={view === item.key ? 'active' : ''} onClick={() => navigate(item.key)}><Icon size={18} /><span>{item.label}</span>{item.key === 'tasks' && pending > 0 && <em>{pending}</em>}</button> })}</nav><footer className="sidebar-footer"><button onClick={() => setCreateOpen(true)}><Plus size={16} /><span>建立新营销任务</span></button><div className="boundary-line"><ShieldCheck size={14} /><span>平台发布 simulated · 人类最终决策</span></div></footer></aside><div className="main-area"><header className="server-topbar"><div><span>1Cat Marketing OS</span><ChevronRight size={13} /><strong>{NAV.find(item => item.key === view)?.label}</strong></div><span className="server-truth-badge"><Database size={13} />SERVER SOURCE OF TRUTH</span></header><main className="main-content server-main"><ServerWorkspacePage view={view} navigate={navigate} /></main></div><CreateCaseDialog open={createOpen} onClose={() => setCreateOpen(false)} /></div>
 }
 
 export default function ServerWorkspace() {

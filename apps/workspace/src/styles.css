@@ -70,6 +70,9 @@ button:active:not(:disabled) { transform: translateY(1px) scale(.99); }
 .topbar-path span { font-family: Consolas, monospace; letter-spacing: .04em; }
 .topbar-path strong { color: var(--ink); font-size: 11px; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
+.workspace-surface-switch { padding: 3px; display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 8px; background: #ece9e0; }
+.workspace-surface-switch button { min-height: 31px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 8px; font-weight: 700; }
+.workspace-surface-switch button.active { color: white; background: var(--forest-2); box-shadow: 0 4px 12px rgba(17,54,45,.16); }
 .quiet-action { min-height: 34px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 9px; }
 .quiet-action:hover { color: var(--forest); background: #ebe8df; }
 .role-switcher { position: relative; min-width: 214px; height: 46px; padding: 5px 34px 5px 6px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
@@ -810,7 +813,8 @@ button.object-row:hover { background: #f1f3ef; }
 }
 
 @media (max-width: 560px) {
-  .topbar-path span, .topbar-path svg, .quiet-action { display: none; }
+  .topbar-path span, .topbar-path svg, .quiet-action, .workspace-surface-switch svg { display: none; }
+  .workspace-surface-switch button { padding-inline: 7px; }
   .topbar-path strong { font-size: 10px; }
   .role-switcher { min-width: 154px; height: 42px; }
   .runtime-case-summary { padding-inline: 10px; gap: 8px; }

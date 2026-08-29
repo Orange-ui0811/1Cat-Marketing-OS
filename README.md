@@ -18,8 +18,9 @@ R0 只生成候选、协作、审核和人工发布任务。抖音、小红书�
 ./bin/1cat e2e
 ```
 
-打开 <http://localhost:8080>。这里直接交付由服务端驱动的八类工作台；三 Agent 完整流程
-分布在任务、协作、对象、决策、异常、Daily、Agent 配置和运行诊断八个页面中。PMA Runtime 研修页位于
+打开 <http://localhost:8080>。默认保留原有八类协作工作台，包括直接与 MO/PMA/BGA 对话、
+计划卡、岗位任务、角色切换、六件套和 Skills；顶部“协作设计 / 真实任务”切换让同一组八类导航
+进入服务端 Marketing Case、人工门禁、最终方案和运行证据。PMA Runtime 研修页位于
 <http://localhost:8080/?view=runtime>。首次登录用户为 `admin`，密码在
 初始化后写入 `.env` 的 `INITIAL_ADMIN_PASSWORD`；不要复制到文档、日志或部署包。
 
@@ -77,6 +78,8 @@ Markdown；最后一次人工确认会批准该方案的明确版本。Agent 只
 
 ### 八类页面如何分工
 
+每个页面都有两层能力：“协作设计”保留原工作台交互，“真实任务”使用 Runtime 服务端事实。
+
 - **任务中心**：新建 Brief、启动 MO/PMA/BGA、完成模拟人工发布、登记合成反馈。
 - **协作中心**：围绕当前 Case 留言，查看 Commitment 与 Handoff 的服务端记录。
 - **业务对象**：查看 Fact、Claim、Campaign、完整内容母稿和 10 章 FINAL DELIVERABLE；切换历史案例并下载 Markdown。
@@ -86,7 +89,7 @@ Markdown；最后一次人工确认会批准该方案的明确版本。Agent 只
 - **Agent 配置**：维护 PMA/BGA/MO 的服务端 Profile 草稿，校验、发布和回滚版本。
 - **运行诊断**：按 Case 查看 Run、Attempt、Lease、Heartbeat、状态时间线与 Trace。
 
-`/?view=workflow` 只保留为兼容入口，并会进入同一套八类服务端工作台；它不再是完成流程所必需的页面。
+`/?view=workflow` 只保留为独立服务端视图的兼容入口；正常操作无需离开原八类工作台。
 
 Windows 请使用 Docker Desktop Linux containers + Git Bash；完整步骤见 `docs/deployment/Windows开发运行手册.md`。
 

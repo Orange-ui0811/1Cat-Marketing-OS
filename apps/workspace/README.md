@@ -1,7 +1,8 @@
 # 1Cat Human × Agent OS 前端原型
 
-这是 1Cat 的统一正式前端源码。八类页面现在直接读写服务端 Marketing Case、Commitment、
-Handoff、Approval、Knowledge、Run、Attempt 与最终方案；不再把独立“完整流程页”作为主操作入口。
+这是 1Cat 的统一正式前端源码。原有八类工作台和 MO/PMA/BGA 对话、计划、角色、六件套、Skills
+完整保留；同一八类导航通过“协作设计 / 真实任务”切换读写服务端 Marketing Case、Commitment、
+Handoff、Approval、Knowledge、Run、Attempt 与最终方案，不再用新界面替换原工作台。
 Compose 的 `workspace` 镜像将它交付到 8080，PMA Runtime 研修页继续保留。
 
 正常使用时执行项目根目录的 `./bin/1cat up`，然后打开
@@ -17,7 +18,7 @@ npm run dev
 
 开发服务器打开：`http://localhost:4173/`，并把后端请求代理到 8080。
 
-API 模式下，任务、协作、对象、决策、异常、Daily、Agent 配置和运行诊断共用同一个服务端 Case；
+API 模式下默认显示原协作工作台；切换到“真实任务”后，任务、协作、对象、决策、异常、Daily、Agent 配置和运行诊断共用同一个服务端 Case；
 用 `/?view=runtime` 可进入 PMA 研修页。`/?view=workflow` 仅作为旧链接兼容入口。
 
 ## Runtime API 模式
@@ -64,7 +65,7 @@ PMA 黄金链路和 401 恢复。`apps/workspace` 是正式源码，镜像同步
 
 ## 当前边界
 
-- API 模式下八类页面的业务事实和操作均来自 Runtime；本地模式仍只用于离线界面原型；
+- “协作设计”是保留的前端演练状态；“真实任务”中的案例、决策、结果、Profile 与 Run 来自 Runtime，界面会明确区分；
 - API 模式可显示 Hermes 运行结果，但 Run 成功不等于业务履约；
 - 发布只生成 `simulated` 回执，`external_effect=false`，不登录或写入真实平台；
 - 本前端用于学习、联调和演示，不是生产实现。

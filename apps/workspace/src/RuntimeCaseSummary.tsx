@@ -90,7 +90,13 @@ function factsFor(
   return byView[view]
 }
 
-export default function RuntimeCaseSummary({ view }: { view: ViewKey }) {
+function ServerEntry({ onOpen, label }: { onOpen?: () => void; label: string }) {
+  return onOpen
+    ? <button onClick={onOpen}><Workflow size={14} />{label}<ArrowUpRight size={13} /></button>
+    : <a href="/?view=workflow"><Workflow size={14} />{label}<ArrowUpRight size={13} /></a>
+}
+
+export default function RuntimeCaseSummary({ view, onOpenServer }: { view: ViewKey; onOpenServer?: () => void }) {
   const [cases, setCases] = useState<MarketingCase[]>([])
   const [item, setItem] = useState<MarketingCase | null>(null)
   const [model, setModel] = useState<RuntimeModel | null>(null)
@@ -131,7 +137,7 @@ export default function RuntimeCaseSummary({ view }: { view: ViewKey }) {
 
   if (!connected) return <section className="runtime-case-summary disconnected" aria-label="服务端案例摘要">
     <div className="runtime-summary-lead"><Server size={17} /><div><strong>服务端案例尚未连接</strong><small>本页仍是本地演练视图；登录完整流程工作台后显示真实 Runtime 摘要。</small></div></div>
-    <a href="/?view=workflow"><Workflow size={14} />连接完整流程 <ArrowUpRight size={13} /></a>
+    <ServerEntry onOpen={onOpenServer} label="连接真实任务" />
   </section>
 
   if (loading && !item) return <section className="runtime-case-summary loading" aria-label="服务端案例摘要">
@@ -141,12 +147,12 @@ export default function RuntimeCaseSummary({ view }: { view: ViewKey }) {
   if (error) return <section className="runtime-case-summary error" aria-label="服务端案例摘要">
     <div className="runtime-summary-lead"><AlertTriangle size={17} /><div><strong>服务端摘要暂不可用</strong><small>{error}；本地演练数据保持不变。</small></div></div>
     <button onClick={() => void load()}><RefreshCw size={13} />重试</button>
-    <a href="/?view=workflow">打开完整流程</a>
+    <ServerEntry onOpen={onOpenServer} label="打开真实任务" />
   </section>
 
   if (!item) return <section className="runtime-case-summary" aria-label="服务端案例摘要">
     <div className="runtime-summary-lead"><Database size={17} /><div><strong>Runtime 已连接，暂无营销案例</strong><small>建立第一个案例后，八类页面会显示对应服务端事实。</small></div></div>
-    <a href="/?view=workflow"><Workflow size={14} />新建案例 <ArrowUpRight size={13} /></a>
+    <ServerEntry onOpen={onOpenServer} label="新建真实案例" />
   </section>
 
   return <section className="runtime-case-summary connected" aria-label="服务端案例摘要">
@@ -156,7 +162,7 @@ export default function RuntimeCaseSummary({ view }: { view: ViewKey }) {
     </div>
     <div className="runtime-summary-actions">
       <button aria-label="刷新服务端案例摘要" onClick={() => void load()}><RefreshCw size={13} /></button>
-      <a href="/?view=workflow">进入完整流程 <ArrowUpRight size={13} /></a>
+      <ServerEntry onOpen={onOpenServer} label="管理真实案例" />
     </div>
   </section>
 }

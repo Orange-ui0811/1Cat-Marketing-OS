@@ -57,6 +57,7 @@ import {
 import { roleCopy } from './demoData'
 import { localModelAdmin, RuntimeApiError, type LocalModelStatus } from './runtimeApi'
 import RuntimeCaseSummary from './RuntimeCaseSummary'
+import { ServerWorkspacePage } from './ServerWorkspace'
 import { StoreProvider, useStore } from './store'
 import type {
   AgentAssignment,
@@ -161,11 +162,21 @@ function App() {
 function ApplicationShell() {
   const { state, setView, setRole, createThread, resetDemo } = useStore()
   const [mobileNav, setMobileNav] = useState(false)
+  const apiMode = import.meta.env.VITE_RUNTIME_MODE === 'api'
+  const [surface, setSurface] = useState<'collaboration' | 'runtime'>('collaboration')
   const pendingCount = state.threads.filter(thread => ['awaiting_plan', 'awaiting_human', 'HOLD'].includes(thread.status)).length
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('view')
+    if (navItems.some(item => item.key === requested) && requested !== state.view) setView(requested as ViewKey)
+  }, [])
 
   function navigate(view: ViewKey) {
     setView(view)
     setMobileNav(false)
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', view)
+    window.history.replaceState({}, '', url)
   }
 
   return (
@@ -202,7 +213,7 @@ function ApplicationShell() {
         </nav>
 
         <footer className="sidebar-footer">
-          <a className="workflow-entry" href="/?view=workflow"><Workflow size={16} /><span>打开完整流程工作台</span></a>
+          {apiMode && <button className="workflow-entry" onClick={() => setSurface(surface === 'runtime' ? 'collaboration' : 'runtime')}><Workflow size={16} /><span>{surface === 'runtime' ? '返回协作工作台' : '查看真实服务端任务'}</span></button>}
           <button onClick={createThread}><Plus size={16} /><span>向 MO 发起新目标</span></button>
           <div className="boundary-line"><LockKeyhole size={14} /><span>四平台 MANUAL · 人类最终决策</span></div>
         </footer>
@@ -217,6 +228,10 @@ function ApplicationShell() {
             <strong>{navItems.find(item => item.key === state.view)?.label}</strong>
           </div>
           <div className="topbar-actions">
+            {apiMode && <div className="workspace-surface-switch" aria-label="切换工作台数据层">
+              <button className={surface === 'collaboration' ? 'active' : ''} onClick={() => setSurface('collaboration')}><MessageSquareText size={14} />协作设计</button>
+              <button className={surface === 'runtime' ? 'active' : ''} onClick={() => setSurface('runtime')}><Database size={14} />真实任务</button>
+            </div>}
             <button className="quiet-action" onClick={resetDemo} title="恢复最初的演示会话与任务"><RotateCcw size={15} /><span>恢复演示初始数据</span></button>
             <label className="role-switcher">
               <span className="role-avatar">{roleCopy[state.role].short.slice(0, 1)}</span>
@@ -228,11 +243,15 @@ function ApplicationShell() {
           </div>
         </header>
 
-        <main id="main-content" className={state.view === 'collaboration' ? 'main-content collaboration-page' : 'main-content'}>
-          <RuntimeCaseSummary view={state.view} />
-          {!['product', 'brand'].includes(state.role) && !['diagnostics', 'agent_config'].includes(state.view)
-            ? <RolePlaceholder role={state.role} onDiagnostics={() => setView('diagnostics')} />
-            : <CurrentView />}
+        <main id="main-content" className={surface === 'collaboration' && state.view === 'collaboration' ? 'main-content collaboration-page' : 'main-content'}>
+          {apiMode && surface === 'runtime'
+            ? <ServerWorkspacePage view={state.view} navigate={navigate} />
+            : <>
+              <RuntimeCaseSummary view={state.view} onOpenServer={apiMode ? () => setSurface('runtime') : undefined} />
+              {!['product', 'brand'].includes(state.role) && !['diagnostics', 'agent_config'].includes(state.view)
+                ? <RolePlaceholder role={state.role} onDiagnostics={() => setView('diagnostics')} />
+                : <CurrentView />}
+            </>}
         </main>
       </div>
     </div>
