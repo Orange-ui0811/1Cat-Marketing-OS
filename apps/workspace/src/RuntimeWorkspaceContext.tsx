@@ -2,7 +2,7 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode,
 } from 'react'
 import {
-  type AgentProfile, type AgentRun, type MarketingCase, type RunAttempt, type RunTransition,
+  type AgentProfile, type AgentRun, type MarketingCase, type MessageAttachmentMetadata, type RunAttempt, type RunTransition,
   type RuntimeModel, RuntimeApiError, runtimeApi, runtimeSession,
 } from './runtimeApi'
 
@@ -25,7 +25,9 @@ type RuntimeWorkspaceValue = {
   selectCase: (caseId: string) => Promise<void>
   createCase: (input: NewCaseInput) => Promise<MarketingCase>
   command: (action: string, payload?: Record<string, unknown>) => Promise<MarketingCase>
-  sendMessage: (input: { channel: 'MO' | 'PMA' | 'BGA'; body: string; intent?: 'message' | 'change_request' | 'decision_note' }) => Promise<MarketingCase>
+  sendMessage: (input: { channel: 'MO' | 'PMA' | 'BGA'; body: string; intent?: 'message' | 'change_request' | 'decision_note'; attachments?: MessageAttachmentMetadata[] }) => Promise<MarketingCase>
+  sendAgentChat: (input: { channel: 'MO' | 'PMA' | 'BGA'; body: string; mode?: 'consultation' | 'task'; attachments?: MessageAttachmentMetadata[] }) => Promise<MarketingCase>
+  cancelRun: (runId: string) => Promise<void>
   loadRunEvidence: (runId: string) => Promise<RunEvidence>
   updateProfile: (item: AgentProfile, config: Record<string, unknown>, summary: string) => Promise<void>
   commandProfile: (item: AgentProfile, action: 'validate' | 'publish' | 'rollback', version?: number) => Promise<void>
@@ -97,16 +99,18 @@ export function RuntimeWorkspaceProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => { if (authenticated) void refresh() }, [authenticated, refresh])
   useEffect(() => {
-    if (!current || current.status !== 'running') return
+    const pendingChat = current?.chat_turns?.some(turn => ['queued', 'running'].includes(turn.status))
+    if (!current || (current.status !== 'running' && !pendingChat)) return
     const timer = window.setInterval(async () => {
       try {
         const next = await runtimeApi.getMarketingCase(current.id)
         setCurrent(next)
-        if (next.status !== 'running') setCases(await runtimeApi.listMarketingCases())
+        const chatStillPending = next.chat_turns?.some(turn => ['queued', 'running'].includes(turn.status))
+        if (next.status !== 'running' && !chatStillPending) setCases(await runtimeApi.listMarketingCases())
       } catch (reason) { handleError(reason, '自动刷新失败') }
     }, 2000)
     return () => window.clearInterval(timer)
-  }, [current?.id, current?.status, handleError])
+  }, [current?.id, current?.status, current?.chat_turns, handleError])
 
   async function login(username: string, password: string) {
     setBusy(true); setError('')
@@ -144,7 +148,7 @@ export function RuntimeWorkspaceProvider({ children }: { children: ReactNode }) 
     } finally { setBusy(false) }
   }
 
-  async function sendMessage(input: { channel: 'MO' | 'PMA' | 'BGA'; body: string; intent?: 'message' | 'change_request' | 'decision_note' }) {
+  async function sendMessage(input: { channel: 'MO' | 'PMA' | 'BGA'; body: string; intent?: 'message' | 'change_request' | 'decision_note'; attachments?: MessageAttachmentMetadata[] }) {
     if (!current) throw new Error('请先选择案例')
     setBusy(true); setError('')
     try {
@@ -154,6 +158,29 @@ export function RuntimeWorkspaceProvider({ children }: { children: ReactNode }) 
     } catch (reason) {
       handleError(reason, '发送失败'); throw reason
     } finally { setBusy(false) }
+  }
+
+  async function sendAgentChat(input: { channel: 'MO' | 'PMA' | 'BGA'; body: string; mode?: 'consultation' | 'task'; attachments?: MessageAttachmentMetadata[] }) {
+    if (!current) throw new Error('请先选择案例')
+    setBusy(true); setError('')
+    try {
+      await runtimeApi.createMarketingChatTurn(current, input)
+      const next = await runtimeApi.getMarketingCase(current.id)
+      setCurrent(next); setCases(await runtimeApi.listMarketingCases())
+      return next
+    } catch (reason) {
+      if (reason instanceof RuntimeApiError && reason.status === 412) await selectCase(current.id)
+      handleError(reason, '真实 Agent 对话启动失败'); throw reason
+    } finally { setBusy(false) }
+  }
+
+  async function cancelRun(runId: string) {
+    setBusy(true); setError('')
+    try {
+      await runtimeApi.cancelRun(runId)
+      if (current) await selectCase(current.id)
+    } catch (reason) { handleError(reason, '取消 Run 失败'); throw reason }
+    finally { setBusy(false) }
   }
 
   async function loadRunEvidence(runId: string) {
@@ -183,7 +210,7 @@ export function RuntimeWorkspaceProvider({ children }: { children: ReactNode }) 
 
   const value = useMemo<RuntimeWorkspaceValue>(() => ({
     authenticated, loading, busy, error, cases, current, model, profiles,
-    login, logout, refresh, selectCase, createCase, command, sendMessage, loadRunEvidence,
+    login, logout, refresh, selectCase, createCase, command, sendMessage, sendAgentChat, cancelRun, loadRunEvidence,
     updateProfile, commandProfile, clearError: () => setError(''),
   }), [authenticated, loading, busy, error, cases, current, model, profiles, selectCase, refresh])
 

@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 CommitmentStatus = Literal[
@@ -96,16 +96,137 @@ class MarketingCaseCommand(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class MarketingMessageAttachment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=180)
+    name: str = Field(min_length=1, max_length=240)
+    type: str = Field(default="application/octet-stream", min_length=1, max_length=120)
+    size: int = Field(ge=0, le=1_000_000_000)
+    last_modified: int | None = Field(default=None, ge=0)
+
+
 class MarketingCaseMessageCreate(BaseModel):
     channel: Literal["MO", "PMA", "BGA"] = "MO"
     body: str = Field(min_length=1, max_length=8000)
     stage_key: str | None = Field(default=None, max_length=60)
     intent: Literal["message", "change_request", "decision_note"] = "message"
-    attachments: list[dict[str, Any]] = Field(default_factory=list, max_length=5)
+    attachments: list[MarketingMessageAttachment] = Field(default_factory=list, max_length=5)
+
+
+class MarketingCaseChangeRequestCreate(BaseModel):
+    channel: Literal["MO", "PMA", "BGA"] = "MO"
+    stage_key: str | None = Field(default=None, max_length=60)
+    summary: str = Field(min_length=2, max_length=240)
+    detail: str = Field(min_length=2, max_length=8000)
+    target_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    proposed_change: dict[str, Any] = Field(default_factory=dict)
+
+
+class MarketingChatTurnCreate(BaseModel):
+    channel: Literal["MO", "PMA", "BGA"]
+    mode: Literal["consultation", "task"] = "consultation"
+    body: str = Field(min_length=1, max_length=8000)
+    stage_key: str | None = Field(default=None, max_length=60)
+    attachments: list[MarketingMessageAttachment] = Field(default_factory=list, max_length=5)
+
+
+class AgentModelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=2, max_length=80)
+    model: str = Field(min_length=2, max_length=120)
+    endpoint_alias: str = Field(min_length=2, max_length=160)
+    credential_ref: str = Field(min_length=4, max_length=240)
+    reasoning_level: Literal["low", "medium", "high"] = "low"
+    max_turns: int = Field(default=1, ge=1, le=20)
+    timeout_seconds: int = Field(default=90, ge=10, le=600)
+
+
+class AgentSixPackResource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: Literal["role_manifest", "soul", "skill_pack", "memory_policy", "daily_operation", "evaluation"]
+    version: str = Field(min_length=1, max_length=40)
+    status: Literal["ready", "warning", "missing"] = "ready"
+    source: str = Field(min_length=2, max_length=300)
+    summary: str = Field(default="", max_length=500)
+
+
+class AgentSkillConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=2, max_length=100, pattern=r"^[A-Za-z0-9_.-]+$")
+    version: str = Field(min_length=1, max_length=40)
+    enabled: bool = True
+    status: Literal["ready", "warning", "missing"] = "ready"
+    source: str = Field(min_length=2, max_length=300)
+    capability: str = Field(default="", max_length=500)
+    permissions: list[str] = Field(default_factory=list, max_length=30)
+
+
+class AgentPermissionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    network: bool = False
+    terminal: bool = False
+    browser: bool = False
+    other_agents: bool = False
+    memory_write: bool = True
+    tools: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("tools")
+    @classmethod
+    def unique_tools(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("工具权限不能重复")
+        return cleaned
+
+
+class AgentPromptTemplate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = Field(min_length=1, max_length=40)
+    body: str = Field(min_length=20, max_length=12000)
+
+
+class AgentPromptTemplates(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workflow: AgentPromptTemplate
+    chat: AgentPromptTemplate
+
+
+class AgentProfileConfigDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent: Literal["MO", "PMA", "BGA"]
+    profile_name: str = Field(min_length=2, max_length=160)
+    role_name: str = Field(min_length=2, max_length=160)
+    model: AgentModelConfig
+    six_pack: list[AgentSixPackResource] = Field(min_length=6, max_length=6)
+    skills: list[AgentSkillConfig] = Field(min_length=1, max_length=40)
+    permissions: AgentPermissionConfig
+    memory_summary: str = Field(min_length=10, max_length=2000)
+    prompt_templates: AgentPromptTemplates
+
+    @model_validator(mode="after")
+    def validate_profile_bundle(self):
+        expected = {"role_manifest", "soul", "skill_pack", "memory_policy", "daily_operation", "evaluation"}
+        keys = [item.key for item in self.six_pack]
+        if set(keys) != expected or len(keys) != len(set(keys)):
+            raise ValueError("岗位六件套必须各出现一次")
+        skill_ids = [item.id for item in self.skills]
+        if len(skill_ids) != len(set(skill_ids)):
+            raise ValueError("Skill ID不能重复")
+        if not any(item.enabled and item.status == "ready" for item in self.skills):
+            raise ValueError("至少需要一个ready且enabled的Skill")
+        return self
 
 
 class AgentProfileUpdate(BaseModel):
-    config: dict[str, Any]
+    config: AgentProfileConfigDocument
     summary: str = Field(default="更新岗位配置草稿", min_length=2, max_length=240)
 
 

@@ -36,7 +36,9 @@ export type AgentRun = {
   role_id: string
   profile_id: string
   profile_version?: number | null
+  profile_hash?: string | null
   profile_snapshot?: Record<string, unknown>
+  purpose?: 'workflow' | 'chat'
   execution_mode?: 'synthetic' | 'real' | null
   case_id?: string | null
   stage_key?: string | null
@@ -104,16 +106,59 @@ export type MarketingCaseResource = {
 
 export type MarketingCaseAction = { action: string; label: string }
 
+export type MessageAttachmentMetadata = {
+  id: string
+  name: string
+  type: string
+  size: number
+  last_modified?: number
+}
+
 export type MarketingCaseMessage = {
   id: string
   case_id: string
   stage_key?: string | null
   channel: 'MO' | 'PMA' | 'BGA'
   sender_type: 'human' | 'agent' | 'system'
-  intent: 'message' | 'change_request' | 'decision_note'
+  intent: 'message' | 'change_request' | 'decision_note' | 'agent_reply'
   body: string
-  attachments: Array<Record<string, unknown>>
+  attachments: MessageAttachmentMetadata[] | Array<Record<string, unknown>>
   created_by: string
+  created_at: string
+}
+
+export type MarketingChatTurn = {
+  id: string
+  case_id: string
+  stage_key?: string | null
+  channel: 'MO' | 'PMA' | 'BGA'
+  mode: 'consultation' | 'task'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+  user_message_id: string
+  agent_message_id?: string | null
+  run_id?: string | null
+  profile_id?: string | null
+  profile_version?: number | null
+  profile_hash?: string | null
+  execution_mode: 'real'
+  failure: Record<string, unknown>
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export type MarketingCaseChangeRequest = {
+  id: string
+  case_id: string
+  stage_key: string
+  channel: 'MO' | 'PMA' | 'BGA'
+  status: string
+  summary: string
+  detail: string
+  target_refs: Array<Record<string, unknown>>
+  proposed_change: Record<string, unknown>
+  resolution: Record<string, unknown>
+  requested_by: string
   created_at: string
 }
 
@@ -207,6 +252,8 @@ export type MarketingCase = {
   final_deliverable?: MarketingDeliverable | null
   deliverable_history: MarketingDeliverableRevision[]
   messages: MarketingCaseMessage[]
+  chat_turns?: MarketingChatTurn[]
+  change_requests?: MarketingCaseChangeRequest[]
   decisions: MarketingDecision[]
   reconciliations: MarketingReconciliation[]
   next_actions: MarketingCaseAction[]
@@ -230,6 +277,8 @@ export type AgentProfile = {
   status: 'draft' | 'validated' | 'published'
   published_version: number
   config: Record<string, any>
+  published_config: Record<string, any>
+  published_hash: string
   updated_by: string
   version: number
   updated_at: string
@@ -365,10 +414,21 @@ export const runtimeApi = {
       body: JSON.stringify({ action, payload }),
     }, true),
   createMarketingCaseMessage: (item: MarketingCase, input: {
-    channel: 'MO' | 'PMA' | 'BGA'; body: string; intent?: 'message' | 'change_request' | 'decision_note'; attachments?: Array<Record<string, unknown>>
+    channel: 'MO' | 'PMA' | 'BGA'; body: string; intent?: 'message' | 'change_request' | 'decision_note'; attachments?: MessageAttachmentMetadata[]
   }) => request<MarketingCase>(`/v1/marketing-cases/${item.id}/messages`, {
     method: 'POST', body: JSON.stringify(input),
   }, true),
+  createMarketingChatTurn: (item: MarketingCase, input: {
+    channel: 'MO' | 'PMA' | 'BGA'; body: string; mode?: 'consultation' | 'task'; stage_key?: string; attachments?: MessageAttachmentMetadata[]
+  }) => request<{ turn: MarketingChatTurn; run: AgentRun; case_version: number }>(
+    `/v1/marketing-cases/${item.id}/chat-turns`,
+    {
+      method: 'POST',
+      headers: { 'If-Match': String(item.version) },
+      body: JSON.stringify(input),
+    },
+    true,
+  ),
   listAgentConfigs: () => request<AgentProfile[]>('/v1/agent-configs'),
   updateAgentConfig: (item: AgentProfile, config: Record<string, unknown>, summary: string) => request<AgentProfile>(`/v1/agent-configs/${item.agent_key}`, {
     method: 'PUT', headers: { 'If-Match': String(item.version) }, body: JSON.stringify({ config, summary }),

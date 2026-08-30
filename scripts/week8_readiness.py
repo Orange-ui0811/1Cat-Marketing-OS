@@ -90,6 +90,17 @@ def validate_workflow_evidence(filename: str, *, observability: bool = False) ->
     )
 
 
+def validate_real_observability_evidence() -> Check:
+    """Prefer mode-specific real evidence; retain compatibility with an older canonical file."""
+    preferred = "marketing-workflow-observability-real-latest.json"
+    fallback = "marketing-workflow-observability-latest.json"
+    filename = preferred if (EVIDENCE_DIR / preferred).is_file() else fallback
+    result = validate_workflow_evidence(filename, observability=True)
+    result.name = "evidence:real-marketing-workflow-observability"
+    result.detail = f"source={filename}; {result.detail}"
+    return result
+
+
 def http_check(name: str, url: str, timeout: float, json_key: tuple[str, str] | None = None) -> Check:
     request = urllib.request.Request(url, headers={"User-Agent": "1cat-week8-readiness/1.0"})
     try:
@@ -153,7 +164,7 @@ def main() -> int:
             validate_drill_evidence("runtime-reliability-drill-latest.json", 5),
             validate_workflow_evidence("marketing-workflow-demo-synthetic-latest.json"),
             validate_workflow_evidence("marketing-workflow-demo-real-latest.json"),
-            validate_workflow_evidence("marketing-workflow-observability-latest.json", observability=True),
+            validate_real_observability_evidence(),
         ]
     )
     if args.online:

@@ -429,6 +429,70 @@ def test_agent_profile_config_is_server_versioned(client, auth_headers):
     assert published.status_code == 200, published.text
     assert published.json()["status"] == "published"
     assert published.json()["config"]["model"]["timeout_seconds"] == 120
+    assert published.json()["published_config"]["model"]["timeout_seconds"] == 120
+    assert len(published.json()["published_hash"]) == 64
+
+
+def test_agent_profile_schema_rejects_incomplete_or_duplicated_runtime_config(client, auth_headers):
+    profiles = client.get("/v1/agent-configs", headers=auth_headers).json()
+    pma = next(item for item in profiles if item["agent_key"] == "PMA")
+    invalid = pma["config"]
+    invalid["prompt_templates"]["chat"]["body"] = "过短"
+    invalid["skills"][1]["id"] = invalid["skills"][0]["id"]
+    response = client.put(
+        "/v1/agent-configs/PMA",
+        headers={**write_headers(auth_headers, "profile-invalid"), "If-Match": str(pma["version"])},
+        json={"config": invalid, "summary": "非法配置必须被拒绝"},
+    )
+    assert response.status_code == 422
+
+
+def test_unpublished_profile_draft_never_changes_new_run_snapshot(client, auth_headers):
+    profiles = client.get("/v1/agent-configs", headers=auth_headers).json()
+    mo = next(item for item in profiles if item["agent_key"] == "MO")
+    original_hash = mo["published_hash"]
+    original_timeout = mo["published_config"]["model"]["timeout_seconds"]
+    draft = mo["config"]
+    draft["model"]["timeout_seconds"] = 222
+    draft["prompt_templates"]["workflow"]["version"] = "v2-draft"
+    saved = client.put(
+        "/v1/agent-configs/MO",
+        headers={**write_headers(auth_headers, "profile-draft-isolation"), "If-Match": str(mo["version"])},
+        json={"config": draft, "summary": "尚未发布的MO配置"},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["status"] == "draft"
+    assert saved.json()["published_hash"] == original_hash
+    assert saved.json()["published_config"]["model"]["timeout_seconds"] == original_timeout
+
+    case = create_case(client, auth_headers).json()
+    case = command(client, auth_headers, case, "start_mo_plan")
+    first_run = next(item["resource"] for item in case["resources"] if item["resource_type"] == "run")
+    assert first_run["profile_hash"] == original_hash
+    assert first_run["profile_snapshot"]["model"]["timeout_seconds"] == original_timeout
+    assert first_run["profile_snapshot"]["prompt_templates"]["workflow"]["version"] == "v1.0"
+
+    validated = client.post(
+        "/v1/agent-configs/MO/commands",
+        headers={**write_headers(auth_headers, "profile-draft-validate"), "If-Match": str(saved.json()["version"])},
+        json={"action": "validate", "summary": "校验MO草稿"},
+    )
+    assert validated.status_code == 200
+    published = client.post(
+        "/v1/agent-configs/MO/commands",
+        headers={**write_headers(auth_headers, "profile-draft-publish"), "If-Match": str(validated.json()["version"])},
+        json={"action": "publish", "summary": "发布MO草稿"},
+    )
+    assert published.status_code == 200
+    assert published.json()["published_hash"] != original_hash
+
+    second_case = create_case(client, auth_headers).json()
+    second_case = command(client, auth_headers, second_case, "start_mo_plan")
+    second_run = next(item["resource"] for item in second_case["resources"] if item["resource_type"] == "run")
+    assert second_run["profile_version"] == published.json()["published_version"]
+    assert second_run["profile_hash"] == published.json()["published_hash"]
+    assert second_run["profile_snapshot"]["model"]["timeout_seconds"] == 222
+    assert first_run["profile_hash"] == original_hash
 
 
 def test_running_case_cancel_waits_for_run_terminal_and_never_skips_stage(client, auth_headers):

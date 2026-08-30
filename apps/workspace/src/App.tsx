@@ -56,7 +56,6 @@ import {
 } from 'lucide-react'
 import { roleCopy } from './demoData'
 import { localModelAdmin, RuntimeApiError, type LocalModelStatus } from './runtimeApi'
-import RuntimeCaseSummary from './RuntimeCaseSummary'
 import { ServerWorkspacePage } from './ServerWorkspace'
 import { StoreProvider, useStore } from './store'
 import type {
@@ -162,8 +161,9 @@ function App() {
 function ApplicationShell() {
   const { state, setView, setRole, createThread, resetDemo } = useStore()
   const [mobileNav, setMobileNav] = useState(false)
-  const apiMode = import.meta.env.VITE_RUNTIME_MODE === 'api'
-  const [surface, setSurface] = useState<'collaboration' | 'runtime'>('collaboration')
+  const runtimeBuild = import.meta.env.VITE_RUNTIME_MODE === 'api'
+  const prototypeMode = new URLSearchParams(window.location.search).get('mode') === 'prototype'
+  const apiMode = runtimeBuild && !prototypeMode
   const pendingCount = state.threads.filter(thread => ['awaiting_plan', 'awaiting_human', 'HOLD'].includes(thread.status)).length
 
   useEffect(() => {
@@ -179,6 +179,14 @@ function ApplicationShell() {
     window.history.replaceState({}, '', url)
   }
 
+  function workspaceHref(mode?: 'prototype') {
+    const url = new URL(window.location.href)
+    if (mode) url.searchParams.set('mode', mode)
+    else url.searchParams.delete('mode')
+    if (!navItems.some(item => item.key === url.searchParams.get('view'))) url.searchParams.set('view', state.view)
+    return `${url.pathname}${url.search}${url.hash}`
+  }
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">跳到主要内容</a>
@@ -188,14 +196,14 @@ function ApplicationShell() {
           <div className="brand-mark" aria-hidden="true"><span>S2</span></div>
           <div>
             <strong>营销组织运行台</strong>
-            <small>AI native · shadow workspace</small>
+            <small>{apiMode ? 'AI native · server workspace' : 'AI native · prototype workspace'}</small>
           </div>
           <button className="icon-button sidebar-close" aria-label="关闭导航" onClick={() => setMobileNav(false)}><X size={18} /></button>
         </header>
 
         <div className="environment-note">
-          <CircleDot size={14} />
-          <div><strong>前端影子演练</strong><small>无真实发布与外部调用</small></div>
+          {apiMode ? <Database size={14} /> : <CircleDot size={14} />}
+          <div><strong>{apiMode ? '真实 Runtime' : '前端界面原型'}</strong><small>{apiMode ? '八类页面统一服务端状态' : '仅供界面参考，不写服务端'}</small></div>
         </div>
 
         <nav className="main-nav" aria-label="主要导航">
@@ -213,8 +221,12 @@ function ApplicationShell() {
         </nav>
 
         <footer className="sidebar-footer">
-          {apiMode && <button className="workflow-entry" onClick={() => setSurface(surface === 'runtime' ? 'collaboration' : 'runtime')}><Workflow size={16} /><span>{surface === 'runtime' ? '返回协作工作台' : '查看真实服务端任务'}</span></button>}
-          <button onClick={createThread}><Plus size={16} /><span>向 MO 发起新目标</span></button>
+          {apiMode
+            ? <button onClick={() => navigate('tasks')}><Plus size={16} /><span>建立新营销任务</span></button>
+            : <>
+              {runtimeBuild && <a className="workflow-entry" href={workspaceHref()}><Workflow size={16} /><span>返回服务端工作台</span></a>}
+              <button onClick={createThread}><Plus size={16} /><span>向 MO 发起新目标</span></button>
+            </>}
           <div className="boundary-line"><LockKeyhole size={14} /><span>四平台 MANUAL · 人类最终决策</span></div>
         </footer>
       </aside>
@@ -228,30 +240,30 @@ function ApplicationShell() {
             <strong>{navItems.find(item => item.key === state.view)?.label}</strong>
           </div>
           <div className="topbar-actions">
-            {apiMode && <div className="workspace-surface-switch" aria-label="切换工作台数据层">
-              <button className={surface === 'collaboration' ? 'active' : ''} onClick={() => setSurface('collaboration')}><MessageSquareText size={14} />协作设计</button>
-              <button className={surface === 'runtime' ? 'active' : ''} onClick={() => setSurface('runtime')}><Database size={14} />真实任务</button>
-            </div>}
-            <button className="quiet-action" onClick={resetDemo} title="恢复最初的演示会话与任务"><RotateCcw size={15} /><span>恢复演示初始数据</span></button>
-            <label className="role-switcher">
-              <span className="role-avatar">{roleCopy[state.role].short.slice(0, 1)}</span>
-              <span><small>当前身份</small><strong>{roleCopy[state.role].label}</strong></span>
-              <select value={state.role} onChange={event => setRole(event.target.value as RoleKey)} aria-label="切换当前身份">
-                {roleOrder.map(role => <option key={role} value={role}>{roleCopy[role].label}</option>)}
-              </select>
-            </label>
+            {apiMode
+              ? <>
+                <span className="server-truth-badge"><Database size={13} />SERVER SOURCE OF TRUTH</span>
+                <a className="quiet-action prototype-entry" href={workspaceHref('prototype')} title="只查看保留的旧界面原型，不写入服务端"><Eye size={15} /><span>界面原型参考</span></a>
+              </>
+              : <>
+                <button className="quiet-action" onClick={resetDemo} title="恢复最初的演示会话与任务"><RotateCcw size={15} /><span>恢复演示初始数据</span></button>
+                <label className="role-switcher">
+                  <span className="role-avatar">{roleCopy[state.role].short.slice(0, 1)}</span>
+                  <span><small>当前身份</small><strong>{roleCopy[state.role].label}</strong></span>
+                  <select value={state.role} onChange={event => setRole(event.target.value as RoleKey)} aria-label="切换当前身份">
+                    {roleOrder.map(role => <option key={role} value={role}>{roleCopy[role].label}</option>)}
+                  </select>
+                </label>
+              </>}
           </div>
         </header>
 
-        <main id="main-content" className={surface === 'collaboration' && state.view === 'collaboration' ? 'main-content collaboration-page' : 'main-content'}>
-          {apiMode && surface === 'runtime'
+        <main id="main-content" className={apiMode ? 'main-content server-main' : state.view === 'collaboration' ? 'main-content collaboration-page' : 'main-content'}>
+          {apiMode
             ? <ServerWorkspacePage view={state.view} navigate={navigate} />
-            : <>
-              <RuntimeCaseSummary view={state.view} onOpenServer={apiMode ? () => setSurface('runtime') : undefined} />
-              {!['product', 'brand'].includes(state.role) && !['diagnostics', 'agent_config'].includes(state.view)
-                ? <RolePlaceholder role={state.role} onDiagnostics={() => setView('diagnostics')} />
-                : <CurrentView />}
-            </>}
+            : !['product', 'brand'].includes(state.role) && !['diagnostics', 'agent_config'].includes(state.view)
+              ? <RolePlaceholder role={state.role} onDiagnostics={() => setView('diagnostics')} />
+              : <CurrentView />}
         </main>
       </div>
     </div>

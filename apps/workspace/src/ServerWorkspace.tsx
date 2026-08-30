@@ -1,14 +1,16 @@
 import {
-  useEffect, useMemo, useState, type FormEvent, type ReactNode,
+  useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode,
 } from 'react'
 import {
   Activity, AlertTriangle, ArrowRight, Bot, Box, CalendarDays, CheckCircle2, ChevronRight,
   CirclePause, ClipboardCheck, Clock3, Database, Download, ExternalLink, FileText, Gauge,
-  GitBranch, History, KeyRound, LayoutDashboard, LogOut, Menu, MessageSquareText, Plus,
-  RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, UserCheck, Wrench, X,
+  GitBranch, History, KeyRound, LayoutDashboard, ListChecks, LogOut, Menu, MessageSquareText,
+  Paperclip, Plus, RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, UserCheck,
+  Wrench, X,
 } from 'lucide-react'
 import {
   type AgentProfile, type LocalModelStatus, type MarketingCase, type MarketingCaseResource,
+  type MessageAttachmentMetadata,
   localModelAdmin,
 } from './runtimeApi'
 import { RuntimeWorkspaceProvider, useRuntimeWorkspace, type RunEvidence } from './RuntimeWorkspaceContext'
@@ -79,18 +81,18 @@ function Login() {
   }
   return <main className="server-login">
     <section className="server-login-copy"><span>1CAT · SERVER WORKSPACE</span><h1>营销组织运行台</h1><p>八类页面直接操作同一套服务端案例、任务、人工门禁和运行证据。</p><div><ShieldCheck size={18} />发布仍为 simulated · 无真实平台写入 · 无 PII</div></section>
-    <form onSubmit={submit}><h2>登录 Runtime</h2><label>用户名<input value={username} onChange={event => setUsername(event.target.value)} /></label><label>密码<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoFocus /></label>{error && <p className="server-error"><AlertTriangle size={14} />{error}</p>}<button disabled={busy || !password}>{busy ? '正在验证…' : '进入八类工作台'}</button></form>
+    <form onSubmit={submit}><h2>登录 Runtime</h2><label>用户名<input value={username} autoComplete="username" onChange={event => setUsername(event.target.value)} /></label><label>密码<input type="password" value={password} autoComplete="current-password" onChange={event => setPassword(event.target.value)} autoFocus /></label>{error && <p className="server-error" role="alert"><AlertTriangle size={14} />{error}</p>}<button disabled={busy || !password}>{busy ? '正在验证…' : '进入八类工作台'}</button></form>
   </main>
 }
 
 function GlobalCaseBar({ onNew }: { onNew: () => void }) {
   const { cases, current, selectCase, refresh, loading, logout } = useRuntimeWorkspace()
   return <section className="server-case-bar">
-    <div className="server-case-identity"><span>当前案例</span><strong>{current?.title || '尚未建立案例'}</strong><small>{current?.id || '从任务中心建立第一个 Brief'}</small></div>
+    <div className="server-case-identity"><span>当前案例</span><strong title={current?.title || undefined}>{current?.title || '尚未建立案例'}</strong><small>{current?.id || '从任务中心建立第一个 Brief'}</small></div>
     <div><span>阶段</span><strong>{current ? STAGE_LABELS[current.current_stage] : '—'}</strong><small>{current ? `v${current.version}` : '—'}</small></div>
     <div><span>状态</span>{current ? <StatusPill value={current.status} /> : <strong>—</strong>}<small>{current ? PLATFORM_LABELS[current.target_platform] : '—'}</small></div>
     <label><History size={14} /><span>案例历史</span><select value={current?.id || ''} disabled={!cases.length} onChange={event => void selectCase(event.target.value)}><option value="" disabled>选择案例</option>{cases.map(item => <option key={item.id} value={item.id}>{item.title} · {statusLabel(item.status)}</option>)}</select></label>
-    <div className="server-case-actions"><button onClick={onNew}><Plus size={14} />新建案例</button><button title="刷新服务端状态" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''} /></button><button title="退出" onClick={logout}><LogOut size={14} /></button></div>
+    <div className="server-case-actions"><button onClick={onNew}><Plus size={14} />新建案例</button><button type="button" title="刷新服务端状态" aria-label="刷新服务端状态" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''} /></button><button type="button" title="退出登录" aria-label="退出登录" onClick={logout}><LogOut size={14} /></button></div>
   </section>
 }
 
@@ -107,7 +109,7 @@ function CreateCaseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     event.preventDefault()
     try { await createCase({ title, objective, brief_body: brief, source_refs: [source], target_platform: platform, execution_mode: mode }); onClose() } catch { /* rendered globally */ }
   }
-  return <div className="server-modal" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}><form className="server-dialog create" onSubmit={submit}><header><div><span>NEW MARKETING CASE</span><h2>建立新任务与 Brief</h2></div><button type="button" onClick={onClose}><X size={17} /></button></header><div className="server-form-grid"><label>案例标题<input value={title} onChange={event => setTitle(event.target.value)} required /></label><label>目标平台<select value={platform} onChange={event => setPlatform(event.target.value)}>{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="full">业务目标<textarea value={objective} onChange={event => setObjective(event.target.value)} required /></label><label className="full">Brief 正文<textarea value={brief} onChange={event => setBrief(event.target.value)} required /></label><label>SourceRef<input value={source} onChange={event => setSource(event.target.value)} required /></label><label>执行模式<select value={mode} onChange={event => setMode(event.target.value as 'synthetic' | 'real')}><option value="synthetic">合成模式</option><option value="real">真实 DeepSeek</option></select></label></div>{mode === 'real' && <p className="server-warning"><AlertTriangle size={14} />将执行四次真实模型调用；当前状态：{model?.execution_enabled ? '已连通' : '未启用'}</p>}{error && <p className="server-error"><AlertTriangle size={14} />{error}</p>}<footer><button type="button" onClick={onClose}>取消</button><button className="primary" disabled={busy || (mode === 'real' && !model?.execution_enabled)}>{busy ? '正在创建…' : '创建案例'}</button></footer></form></div>
+  return <div className="server-modal" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}><form className="server-dialog create" role="dialog" aria-modal="true" aria-labelledby="create-case-title" onSubmit={submit}><header><div><span>NEW MARKETING CASE</span><h2 id="create-case-title">建立新任务与 Brief</h2></div><button type="button" aria-label="关闭新建案例窗口" onClick={onClose}><X size={17} /></button></header><div className="server-form-grid"><label>案例标题<input value={title} onChange={event => setTitle(event.target.value)} required /></label><label>目标平台<select value={platform} onChange={event => setPlatform(event.target.value)}>{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="full">业务目标<textarea value={objective} onChange={event => setObjective(event.target.value)} required /></label><label className="full">Brief 正文<textarea value={brief} onChange={event => setBrief(event.target.value)} required /></label><label>SourceRef<input value={source} onChange={event => setSource(event.target.value)} required /></label><label>执行模式<select value={mode} onChange={event => setMode(event.target.value as 'synthetic' | 'real')}><option value="synthetic">合成模式</option><option value="real">真实 DeepSeek</option></select></label></div>{mode === 'real' && <p className="server-warning"><AlertTriangle size={14} />将执行四次真实模型调用；当前状态：{model?.execution_enabled ? '已连通' : '未启用'}</p>}{error && <p className="server-error" role="alert"><AlertTriangle size={14} />{error}</p>}<footer><button type="button" onClick={onClose}>取消</button><button className="primary" disabled={busy || (mode === 'real' && !model?.execution_enabled)}>{busy ? '正在创建…' : '创建案例'}</button></footer></form></div>
 }
 
 function StageStrip({ item }: { item: MarketingCase }) {
@@ -140,20 +142,109 @@ function ResourceSummary({ ref }: { ref: MarketingCaseResource }) {
   return <article className="server-resource-summary"><header><span>{ref.resource_type}</span><StatusPill value={String(value.status || 'recorded')} /></header><strong>{String(value.title || value.purpose || value.task_type || value.kind || ref.relation)}</strong><p>{String(value.instructions || value.reason_code || value.body || ref.relation).slice(0, 220)}</p><small>{ref.resource_id} {value.version ? `· v${value.version}` : ''}</small></article>
 }
 
-function CollaborationPage() {
-  const { current, sendMessage, busy } = useRuntimeWorkspace()
-  const [channel, setChannel] = useState<'MO' | 'PMA' | 'BGA'>('MO')
-  const [body, setBody] = useState('')
-  const [intent, setIntent] = useState<'message' | 'change_request'>('message')
-  if (!current) return <section className="server-page"><PageTitle eyebrow="ROLE COLLABORATION" title="协作中心" body="查看真实岗位承诺、交接和沟通记录。" /><Empty title="请先建立案例" body="协作记录以 Marketing Case 为边界持久化。" /></section>
-  const messages = current.messages.filter(item => item.channel === channel)
+function CollaborationCaseHistory() {
+  const { cases, current, selectCase, loading } = useRuntimeWorkspace()
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<'all' | 'attention' | 'running' | 'closed'>('all')
+  const visible = cases.filter(item => {
+    const matchesQuery = !query.trim() || `${item.title} ${item.id}`.toLowerCase().includes(query.trim().toLowerCase())
+    const matchesFilter = filter === 'all'
+      || (filter === 'attention' && ['awaiting_human', 'blocked'].includes(item.status))
+      || (filter === 'running' && ['active', 'running'].includes(item.status))
+      || (filter === 'closed' && ['completed', 'cancelled'].includes(item.status))
+    return matchesQuery && matchesFilter
+  })
+  return <section className="server-case-history"><header><div><span>CASE HISTORY</span><h2>案例历史</h2></div><small>{visible.length}/{cases.length}</small></header><label><Search size={13} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索案例或 ID" /></label><nav>{([['all', '全部'], ['attention', '待我'], ['running', '推进中'], ['closed', '已结束']] as const).map(([value, label]) => <button type="button" key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</nav><div>{visible.map(item => <button type="button" key={item.id} className={current?.id === item.id ? 'active' : ''} disabled={loading} onClick={() => void selectCase(item.id)}><header><span>{item.id.slice(0, 14)}</span><StatusPill value={item.status} /></header><strong>{item.title}</strong><small>{STAGE_LABELS[item.current_stage] || item.current_stage} · {dateTime(item.updated_at)}</small></button>)}{!visible.length && <p>没有匹配的服务端案例。</p>}</div></section>
+}
+
+function CollaborationPlanCard() {
+  const { current, command, busy } = useRuntimeWorkspace()
+  const [reason, setReason] = useState('已核对计划正文、岗位分工、证据缺口和人工门禁。')
+  if (!current) return null
+  const plans = current.resources.filter(ref => ref.resource_type === 'knowledge'
+    && ref.resource?.kind === 'review' && ref.resource?.metadata?.stage_key === 'mo_plan')
+  const plan = [...plans].reverse().find(ref => ref.resource?.status !== 'returned') || plans.at(-1)
+  if (!plan) return null
+  const value = plan.resource || {}
+  const actions = current.next_actions.filter(action => ['approve_mo_plan', 'return_mo_plan'].includes(action.action))
+  async function decide(action: string) { try { await command(action, { reason }) } catch { /* context error */ } }
+  return <article className="server-plan-card"><header><div><GitBranch size={17} /><span><strong>MO 协作计划</strong><small>{plan.resource_id} · v{String(value.version || plan.resource_version || 1)}</small></span></div><StatusPill value={String(value.status || 'candidate')} /></header><h3>{String(value.title || 'MO Plan')}</h3><p>{String(value.body || '')}</p>{Array.isArray(value.source_refs) && value.source_refs.length > 0 && <details><summary>来源与计划历史</summary><pre>{JSON.stringify(value.source_refs, null, 2)}</pre><div>{plans.map(item => <span key={item.id}>{item.resource_id.slice(0, 12)} · v{String(item.resource?.version || 1)} · {String(item.resource?.status || 'candidate')}</span>)}</div></details>}{actions.length > 0 && <footer><textarea value={reason} onChange={event => setReason(event.target.value)} aria-label="计划决策理由" /><div>{actions.map(action => <button type="button" key={action.action} className={action.action.startsWith('return_') ? 'danger' : 'primary'} disabled={busy || reason.trim().length < 2} onClick={() => void decide(action.action)}>{action.label}</button>)}</div></footer>}</article>
+}
+
+function CollaborationObserver({ navigate }: { navigate: (view: ViewKey) => void }) {
+  const { current } = useRuntimeWorkspace()
+  if (!current) return null
+  const active = current.stages.find(stage => stage.step_key === current.current_stage)
   const commitments = current.resources.filter(ref => ref.resource_type === 'commitment')
   const handoffs = current.resources.filter(ref => ref.resource_type === 'handoff')
+  const runs = current.resources.filter(ref => ref.resource_type === 'run')
+  const changes = current.change_requests || []
+  return <aside className="server-collaboration-observer"><header><div><ListChecks size={16} /><span><strong>任务观察器</strong><small>只读服务端事实</small></span></div><StatusPill value={current.status} /></header><section className="server-observer-current"><span>当前阶段</span><strong>{STAGE_LABELS[current.current_stage]}</strong><small>{active?.active_run_id ? `Run ${active.active_run_id.slice(0, 15)}` : statusLabel(active?.status || current.status)}</small></section><ol>{current.stages.map(stage => <li key={stage.id} className={stage.status}><span>{stage.ordinal}</span><div><strong>{STAGE_LABELS[stage.step_key]}</strong><small>{statusLabel(stage.status)}</small></div></li>)}</ol><section><header><h3>Commitment</h3><small>{commitments.length}</small></header>{commitments.slice(-3).reverse().map(ref => <ResourceSummary key={ref.id} ref={ref} />)}{!commitments.length && <p>尚无岗位承诺。</p>}</section><section><header><h3>Handoff</h3><small>{handoffs.length}</small></header>{handoffs.slice(-3).reverse().map(ref => <ResourceSummary key={ref.id} ref={ref} />)}{!handoffs.length && <p>尚无岗位交接。</p>}</section><section><header><h3>Change Request</h3><small>{changes.length}</small></header>{[...changes].reverse().slice(0, 4).map(item => <article className="server-observer-change" key={item.id}><header><StatusPill value={item.status} /><small>{item.channel}</small></header><strong>{item.summary}</strong><p>{item.detail}</p></article>)}{!changes.length && <p>尚无正式变更请求。</p>}</section><footer><button type="button" onClick={() => navigate('diagnostics')}><Activity size={13} />查看 {runs.length} 个 Run</button><button type="button" onClick={() => navigate('reviews')}><ClipboardCheck size={13} />打开决策台账</button></footer></aside>
+}
+
+function CollaborationPage({ navigate }: { navigate: (view: ViewKey) => void }) {
+  const { current, model, sendMessage, sendAgentChat, cancelRun, busy, error } = useRuntimeWorkspace()
+  const [channel, setChannel] = useState<'MO' | 'PMA' | 'BGA'>('MO')
+  const [body, setBody] = useState('')
+  const [intent, setIntent] = useState<'agent_chat' | 'message' | 'change_request'>('agent_chat')
+  const [chatMode, setChatMode] = useState<'consultation' | 'task'>('consultation')
+  const [attachments, setAttachments] = useState<MessageAttachmentMetadata[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
+  useEffect(() => { setBody(''); setAttachments([]) }, [current?.id, channel])
+  if (!current) return <section className="server-page"><PageTitle eyebrow="ROLE COLLABORATION" title="协作中心" body="查看真实岗位承诺、交接和沟通记录。" /><Empty title="请先建立案例" body="协作记录以 Marketing Case 为边界持久化。" /></section>
+  const messages = current.messages.filter(item => item.channel === channel)
+  const chatTurns = (current.chat_turns || []).filter(item => item.channel === channel)
+  const pendingTurns = chatTurns.filter(item => ['queued', 'running'].includes(item.status))
+  function addFiles(event: ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(event.target.files || []).slice(0, 5 - attachments.length)
+    setAttachments(existing => [...existing, ...selected.map(file => ({
+      id: crypto.randomUUID(),
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      last_modified: file.lastModified,
+    }))].slice(0, 5))
+    event.target.value = ''
+  }
   async function submit(event: FormEvent) {
     event.preventDefault(); if (!body.trim()) return
-    try { await sendMessage({ channel, body: body.trim(), intent }); setBody('') } catch { /* context error */ }
+    try {
+      if (intent === 'agent_chat') await sendAgentChat({ channel, body: body.trim(), mode: chatMode, attachments })
+      else await sendMessage({ channel, body: body.trim(), intent, attachments })
+      setBody(''); setAttachments([])
+    } catch { /* context error */ }
   }
-  return <section className="server-page collaboration"><PageTitle eyebrow="ROLE COLLABORATION" title="协作中心" body="MO 主线程连接 PMA、BGA 子线程；消息、Commitment 和 Handoff 全部是服务端事实。" /><div className="server-collaboration-layout"><aside><h2>岗位频道</h2>{(['MO', 'PMA', 'BGA'] as const).map(value => <button key={value} className={channel === value ? 'active' : ''} onClick={() => setChannel(value)}><span>{value}</span><div><strong>{value === 'MO' ? 'Marketing Orchestrator' : value === 'PMA' ? 'Product Marketing Agent' : 'Brand & Growth Agent'}</strong><small>{current.messages.filter(item => item.channel === value).length} 条记录</small></div><ChevronRight size={15} /></button>)}<h3>岗位承诺</h3>{commitments.map(ref => <ResourceSummary key={ref.id} ref={ref} />)}<h3>岗位交接</h3>{handoffs.map(ref => <ResourceSummary key={ref.id} ref={ref} />)}</aside><main><header><div><span>{channel}</span><h2>{current.title}</h2></div><StatusPill value={current.status} /></header><div className="server-message-list">{messages.map(message => <article key={message.id} className={message.sender_type}><span>{message.sender_type === 'human' ? '你' : message.sender_type === 'system' ? 'SYS' : channel}</span><div><header><strong>{message.created_by}</strong><time>{dateTime(message.created_at)}</time>{message.intent === 'change_request' && <em>变更请求</em>}</header><p>{message.body}</p><small>{STAGE_LABELS[message.stage_key || ''] || message.stage_key}</small></div></article>)}{!messages.length && <Empty title="这个频道还没有消息" body="你可以补充背景或提交任务变更请求；它们会持久化到当前案例。" />}</div><form className="server-composer" onSubmit={submit}><div><button type="button" className={intent === 'message' ? 'active' : ''} onClick={() => setIntent('message')}>普通沟通</button><button type="button" className={intent === 'change_request' ? 'active' : ''} onClick={() => setIntent('change_request')}>任务变更</button></div><textarea value={body} onChange={event => setBody(event.target.value)} placeholder={intent === 'change_request' ? '说明需要修改的目标、范围、证据或交付物…' : `向 ${channel} 补充上下文…`} /><button disabled={busy || !body.trim()}><Send size={15} />发送</button></form></main></div></section>
+  const realChatAvailable = Boolean(model?.execution_enabled)
+  return <section className="server-page collaboration">
+    <PageTitle eyebrow="ROLE COLLABORATION" title="协作中心" body="案例、计划、三岗位消息、任务观察器、变更请求、Commitment 和 Handoff 全部读取同一个 Runtime。" />
+    <div className="server-collaboration-layout">
+      <aside className="server-collaboration-rail">
+        <CollaborationCaseHistory />
+        <section className="server-channel-list">
+          <h2>岗位频道</h2>
+          {(['MO', 'PMA', 'BGA'] as const).map(value => <button type="button" key={value} className={channel === value ? 'active' : ''} onClick={() => setChannel(value)}><span>{value}</span><div><strong>{value === 'MO' ? 'Marketing Orchestrator' : value === 'PMA' ? 'Product Marketing Agent' : 'Brand & Growth Agent'}</strong><small>{current.messages.filter(item => item.channel === value).length} 条记录 · {(current.chat_turns || []).filter(item => item.channel === value).length} 次真实对话</small></div><ChevronRight size={15} /></button>)}
+        </section>
+      </aside>
+      <main>
+        <header><div><span>{channel} · REAL AGENT CHANNEL</span><h2>{current.title}</h2></div><div className="server-channel-state"><StatusPill value={realChatAvailable ? 'validated' : 'draft'} /><small>{realChatAvailable ? `${model?.provider} / ${model?.model}` : 'DeepSeek未启用'}</small></div></header>
+        {error && <p className="server-error"><AlertTriangle size={14} />{error}</p>}
+        {channel === 'MO' && <CollaborationPlanCard />}
+        {pendingTurns.length > 0 && <section className="server-chat-runs"><strong>真实 Agent 正在处理</strong>{pendingTurns.map(turn => <article key={turn.id}><div><Bot size={15} /><span><strong>{turn.mode === 'task' ? '任务型对话' : '咨询对话'}</strong><small>Run {turn.run_id?.slice(0, 16)} · Profile v{turn.profile_version}</small></span></div><StatusPill value={turn.status} />{turn.run_id && <button type="button" disabled={busy} onClick={() => void cancelRun(turn.run_id!)}>取消 Run</button>}</article>)}</section>}
+        <div className="server-message-list">
+          {messages.map(message => <article key={message.id} className={message.sender_type}><span>{message.sender_type === 'human' ? '你' : message.sender_type === 'system' ? 'SYS' : channel}</span><div><header><strong>{message.created_by}</strong><time>{dateTime(message.created_at)}</time>{message.intent === 'change_request' && <em>变更请求</em>}{message.intent === 'agent_reply' && <em>真实 Agent 回复</em>}</header><p>{message.body}</p>{message.attachments?.length > 0 && <div className="server-message-attachments">{message.attachments.map((raw, index) => { const attachment = raw as Record<string, unknown>; return <span key={String(attachment.id || index)}><Paperclip size={11} />{attachment.name ? String(attachment.name) : attachment.run_id ? `Run ${String(attachment.run_id).slice(0, 16)}` : String(attachment.type || '附件元数据')}<small>{typeof attachment.size === 'number' ? `${Math.max(1, Math.round(attachment.size / 1024))} KB` : '可追溯引用'}</small></span> })}</div>}<small>{STAGE_LABELS[message.stage_key || ''] || message.stage_key}{message.attachments?.[0] && 'run_id' in message.attachments[0] ? ` · Run ${String(message.attachments[0].run_id).slice(0, 16)}` : ''}</small></div></article>)}
+          {!messages.length && <Empty title="这个频道还没有消息" body="选择“真实 Agent 对话”会创建只读 DeepSeek Run；人工补充和任务变更则只记录服务端事实。" />}
+        </div>
+        <form className="server-composer" onSubmit={submit}>
+          <div><button type="button" className={intent === 'agent_chat' ? 'active' : ''} onClick={() => setIntent('agent_chat')}><Bot size={13} />真实 Agent 对话</button><button type="button" className={intent === 'message' ? 'active' : ''} onClick={() => setIntent('message')}>人工补充</button><button type="button" className={intent === 'change_request' ? 'active' : ''} onClick={() => setIntent('change_request')}>任务变更</button>{intent === 'agent_chat' && <label>模式<select value={chatMode} onChange={event => setChatMode(event.target.value as 'consultation' | 'task')}><option value="consultation">咨询，不改业务状态</option><option value="task">任务建议，不自动执行</option></select></label>}</div>
+          {intent === 'agent_chat' && <p className={`server-chat-boundary ${realChatAvailable ? '' : 'unavailable'}`}><ShieldCheck size={13} />{realChatAvailable ? '将创建真实 DeepSeek Run；MCP 只读，回复附带 Run 与 Profile 版本。' : '请先到 Agent 配置完成 DeepSeek 验证；系统不会生成模拟回复。'}</p>}
+          {attachments.length > 0 && <div className="server-attachment-row">{attachments.map(file => <span key={file.id}><FileText size={12} /><span>{file.name}</span><small>{Math.max(1, Math.round(file.size / 1024))} KB</small><button type="button" aria-label={`移除 ${file.name}`} onClick={() => setAttachments(items => items.filter(item => item.id !== file.id))}><X size={11} /></button></span>)}</div>}
+          <div className="server-composer-entry"><textarea aria-label={`向 ${channel} 输入消息`} value={body} onChange={event => setBody(event.target.value)} placeholder={intent === 'change_request' ? '说明需要修改的目标、范围、证据或交付物…' : intent === 'agent_chat' ? `向真实 ${channel} Agent 提问…` : `向 ${channel} 补充可追溯上下文…`} /><button type="submit" className="server-send-button" disabled={busy || !body.trim() || (intent === 'agent_chat' && !realChatAvailable)}><Send size={17} aria-hidden="true" /><span>{busy ? '处理中…' : intent === 'agent_chat' ? '发送给 Agent' : '记录消息'}</span></button></div>
+          <footer><button type="button" disabled={attachments.length >= 5} onClick={() => fileInput.current?.click()}><Paperclip size={13} />添加附件元数据</button><input ref={fileInput} type="file" multiple hidden onChange={addFiles} /><small>只保存名称、类型、大小和修改时间；不上传文件正文或本机路径。最多 5 项。</small></footer>
+        </form>
+      </main>
+      <CollaborationObserver navigate={navigate} />
+    </div>
+  </section>
 }
 
 function Deliverable({ item }: { item: MarketingCase }) {
@@ -184,7 +275,7 @@ function DecisionDialog({ action, onClose }: { action: { action: string; label: 
     event.preventDefault()
     try { await command(action.action, { reason }); onClose() } catch { /* context error */ }
   }
-  return <div className="server-modal"><form className="server-dialog decision" onSubmit={submit}><header><div><span>HUMAN GATE</span><h2>{action.label}</h2></div><button type="button" onClick={onClose}><X size={17} /></button></header><p>决定将绑定当前案例、阶段及对象版本，提交后不可从审计历史中删除。</p><label>决策理由<textarea value={reason} onChange={event => setReason(event.target.value)} autoFocus /></label><footer><button type="button" onClick={onClose}>取消</button><button className={action.action.startsWith('return_') || action.action.includes('hold') || action.action.includes('takeover') ? 'danger' : 'primary'} disabled={busy || reason.trim().length < 2}>{busy ? '正在记录…' : '确认并记录'}</button></footer></form></div>
+  return <div className="server-modal"><form className="server-dialog decision" role="dialog" aria-modal="true" aria-labelledby="decision-dialog-title" onSubmit={submit}><header><div><span>HUMAN GATE</span><h2 id="decision-dialog-title">{action.label}</h2></div><button type="button" aria-label="关闭决策窗口" onClick={onClose}><X size={17} /></button></header><p>决定将绑定当前案例、阶段及对象版本，提交后不可从审计历史中删除。</p><label>决策理由<textarea value={reason} onChange={event => setReason(event.target.value)} autoFocus /></label><footer><button type="button" onClick={onClose}>取消</button><button className={action.action.startsWith('return_') || action.action.includes('hold') || action.action.includes('takeover') ? 'danger' : 'primary'} disabled={busy || reason.trim().length < 2}>{busy ? '正在记录…' : '确认并记录'}</button></footer></form></div>
 }
 
 function ReviewsPage() {
@@ -237,18 +328,85 @@ function ModelConnection() {
   useEffect(() => { void refresh() }, [])
   async function save() { setBusy(true); setNotice(''); try { const next = await localModelAdmin.configure(key.trim() || undefined); setStatus(next); setKey(''); setNotice(next.message || 'DeepSeek 已验证并启用') } catch (reason) { setNotice(reason instanceof Error ? reason.message : '配置失败') } finally { setBusy(false) } }
   async function test() { setBusy(true); try { const next = await localModelAdmin.test(); setStatus(next); setNotice(next.message || '模型调用通过') } catch (reason) { setNotice(reason instanceof Error ? reason.message : '模型测试失败') } finally { setBusy(false) } }
-  return <section className="server-model-connection"><header><KeyRound size={18} /><div><h2>DeepSeek 真实执行连接</h2><p>密钥只写入本机 Secret，不进入浏览器存储。</p></div><StatusPill value={status?.execution_enabled ? 'validated' : 'draft'} /></header><div><label>API Key<input type="password" value={key} onChange={event => setKey(event.target.value)} placeholder={status?.credential_configured ? '已保存；输入新 Key 可替换' : '输入 DeepSeek API Key'} /></label><button disabled={busy || (!key.trim() && !status?.credential_configured)} onClick={() => void save()}>保存并验证</button><button disabled={busy || !status?.execution_enabled} onClick={() => void test()}>测试调用</button></div>{notice && <p>{notice}</p>}</section>
+  return <section className="server-model-connection"><header><KeyRound size={18} /><div><h2>DeepSeek 真实执行连接</h2><p>密钥只写入本机 Secret，不进入浏览器存储。</p></div><StatusPill value={status?.execution_enabled ? 'validated' : 'draft'} /></header><div><label>API Key<input type="password" autoComplete="new-password" value={key} onChange={event => setKey(event.target.value)} placeholder={status?.credential_configured ? '已保存；输入新 Key 可替换' : '输入 DeepSeek API Key'} /></label><button disabled={busy || (!key.trim() && !status?.credential_configured)} onClick={() => void save()}>保存并验证</button><button disabled={busy || !status?.execution_enabled} onClick={() => void test()}>测试调用</button></div>{notice && <p aria-live="polite">{notice}</p>}</section>
+}
+
+type ProfileTab = 'overview' | 'six_pack' | 'skills' | 'permissions' | 'prompts'
+
+function ProfileOverviewEditor({ draft, setDraft }: { draft: Record<string, any>; setDraft: (next: Record<string, any>) => void }) {
+  const model = draft.model || {}
+  const setModel = (key: string, value: unknown) => setDraft({ ...draft, model: { ...model, [key]: value } })
+  return <div className="server-form-grid">
+    <label>Profile 名称<input value={String(draft.profile_name || '')} onChange={event => setDraft({ ...draft, profile_name: event.target.value })} /></label>
+    <label>岗位名称<input value={String(draft.role_name || '')} onChange={event => setDraft({ ...draft, role_name: event.target.value })} /></label>
+    <label>Provider<input value={String(model.provider || '')} onChange={event => setModel('provider', event.target.value)} /></label>
+    <label>模型<input value={String(model.model || '')} onChange={event => setModel('model', event.target.value)} /></label>
+    <label>Endpoint 别名<input value={String(model.endpoint_alias || '')} onChange={event => setModel('endpoint_alias', event.target.value)} /></label>
+    <label>凭据引用<input value={String(model.credential_ref || '')} onChange={event => setModel('credential_ref', event.target.value)} /></label>
+    <label>推理等级<select value={String(model.reasoning_level || 'low')} onChange={event => setModel('reasoning_level', event.target.value)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+    <label>最大轮数<input type="number" min="1" max="20" value={Number(model.max_turns || 1)} onChange={event => setModel('max_turns', Number(event.target.value))} /></label>
+    <label>超时秒数<input type="number" min="10" max="600" value={Number(model.timeout_seconds || 90)} onChange={event => setModel('timeout_seconds', Number(event.target.value))} /></label>
+    <label className="full">Memory 策略<textarea value={String(draft.memory_summary || '')} onChange={event => setDraft({ ...draft, memory_summary: event.target.value })} /></label>
+  </div>
+}
+
+function SixPackEditor({ draft, setDraft }: { draft: Record<string, any>; setDraft: (next: Record<string, any>) => void }) {
+  const items = Array.isArray(draft.six_pack) ? draft.six_pack : []
+  const update = (index: number, patch: Record<string, unknown>) => setDraft({ ...draft, six_pack: items.map((item: any, itemIndex: number) => itemIndex === index ? { ...item, ...patch } : item) })
+  return <div className="server-profile-list">{items.map((item: any, index: number) => <article key={item.key}>
+    <header><FileText size={15} /><div><strong>{item.key}</strong><small>固定岗位资源，不可删除</small></div><StatusPill value={String(item.status)} /></header>
+    <div className="server-profile-row"><label>版本<input value={String(item.version || '')} onChange={event => update(index, { version: event.target.value })} /></label><label>状态<select value={String(item.status || 'ready')} onChange={event => update(index, { status: event.target.value })}><option value="ready">ready</option><option value="warning">warning</option><option value="missing">missing</option></select></label><label className="wide">来源<input value={String(item.source || '')} onChange={event => update(index, { source: event.target.value })} /></label></div>
+    <label className="server-profile-text">摘要<textarea value={String(item.summary || '')} onChange={event => update(index, { summary: event.target.value })} /></label>
+  </article>)}</div>
+}
+
+function SkillsEditor({ draft, setDraft }: { draft: Record<string, any>; setDraft: (next: Record<string, any>) => void }) {
+  const items = Array.isArray(draft.skills) ? draft.skills : []
+  const update = (index: number, patch: Record<string, unknown>) => setDraft({ ...draft, skills: items.map((item: any, itemIndex: number) => itemIndex === index ? { ...item, ...patch } : item) })
+  const add = () => setDraft({ ...draft, skills: [...items, { id: `custom-skill-${items.length + 1}`, version: 'v1.0', enabled: false, status: 'warning', source: 'custom-skill', capability: '', permissions: [] }] })
+  const remove = (index: number) => setDraft({ ...draft, skills: items.filter((_: any, itemIndex: number) => itemIndex !== index) })
+  return <><div className="server-profile-toolbar"><p>只有 <code>enabled + ready</code> 的 Skill 会进入下一条 Run 快照。</p><button type="button" onClick={add}><Plus size={13} />添加 Skill</button></div><div className="server-profile-list skills">{items.map((item: any, index: number) => <article key={`${item.id}-${index}`}>
+    <header><Wrench size={15} /><div><strong>{item.id}</strong><small>{item.capability || '尚未填写能力说明'}</small></div><label className="server-profile-toggle"><input type="checkbox" checked={Boolean(item.enabled)} onChange={event => update(index, { enabled: event.target.checked })} /><span>{item.enabled ? '启用' : '停用'}</span></label><button type="button" className="danger" disabled={items.length <= 1} onClick={() => remove(index)}>删除</button></header>
+    <div className="server-profile-row"><label>ID<input value={String(item.id || '')} onChange={event => update(index, { id: event.target.value })} /></label><label>版本<input value={String(item.version || '')} onChange={event => update(index, { version: event.target.value })} /></label><label>状态<select value={String(item.status || 'ready')} onChange={event => update(index, { status: event.target.value })}><option value="ready">ready</option><option value="warning">warning</option><option value="missing">missing</option></select></label><label className="wide">受信来源<input value={String(item.source || '')} onChange={event => update(index, { source: event.target.value })} /></label></div>
+    <label className="server-profile-text">能力说明<textarea value={String(item.capability || '')} onChange={event => update(index, { capability: event.target.value })} /></label>
+    <label className="server-profile-text">Skill 权限（每行一项）<textarea value={(item.permissions || []).join('\n')} onChange={event => update(index, { permissions: event.target.value.split('\n').map(value => value.trim()).filter(Boolean) })} /></label>
+  </article>)}</div></>
+}
+
+function PermissionsEditor({ draft, setDraft }: { draft: Record<string, any>; setDraft: (next: Record<string, any>) => void }) {
+  const permissions = draft.permissions || {}
+  const set = (key: string, value: unknown) => setDraft({ ...draft, permissions: { ...permissions, [key]: value } })
+  return <section className="server-permission-editor"><div>{([['network', '允许联网'], ['terminal', '允许终端'], ['browser', '允许浏览器'], ['other_agents', '允许调用其他 Agent'], ['memory_write', '允许写岗位 Memory']] as const).map(([key, label]) => <label key={key}><span>{label}<small>{['network', 'terminal', 'browser'].includes(key) ? 'Runtime 边界仍会取更严格值' : '写入发布快照'}</small></span><input type="checkbox" checked={Boolean(permissions[key])} onChange={event => set(key, event.target.checked)} /></label>)}</div><label>允许工具（每行一项）<textarea value={(permissions.tools || []).join('\n')} onChange={event => set('tools', event.target.value.split('\n').map(value => value.trim()).filter(Boolean))} /></label><p><ShieldCheck size={14} />Profile 只能收窄能力，不能绕过 Runtime、MCP 或人工门禁。</p></section>
+}
+
+function PromptEditor({ draft, setDraft }: { draft: Record<string, any>; setDraft: (next: Record<string, any>) => void }) {
+  const prompts = draft.prompt_templates || {}
+  const update = (kind: 'workflow' | 'chat', patch: Record<string, unknown>) => setDraft({ ...draft, prompt_templates: { ...prompts, [kind]: { ...(prompts[kind] || {}), ...patch } } })
+  return <div className="server-prompt-editor">{(['workflow', 'chat'] as const).map(kind => <article key={kind}><header><GitBranch size={15} /><div><strong>{kind === 'workflow' ? '工作流执行模板' : '岗位对话模板'}</strong><small>发布后只影响新建 Run</small></div></header><label>模板版本<input value={String(prompts[kind]?.version || '')} onChange={event => update(kind, { version: event.target.value })} /></label><label>受控指令<textarea value={String(prompts[kind]?.body || '')} onChange={event => update(kind, { body: event.target.value })} /></label></article>)}</div>
 }
 
 function AgentConfigPage() {
   const { profiles, updateProfile, commandProfile, busy } = useRuntimeWorkspace()
   const [agent, setAgent] = useState<'MO' | 'PMA' | 'BGA'>('MO')
+  const [tab, setTab] = useState<ProfileTab>('overview')
+  const [summary, setSummary] = useState('更新岗位配置草稿')
   const selected = profiles.find(item => item.agent_key === agent)
   const [draft, setDraft] = useState<Record<string, any>>({})
-  useEffect(() => { if (selected) setDraft(structuredClone(selected.config)) }, [selected?.id, selected?.version])
+  useEffect(() => { if (selected) { setDraft(structuredClone(selected.config)); setSummary(`更新 ${selected.agent_key} 岗位配置草稿`) } }, [selected?.id, selected?.version])
   if (!selected) return <section className="server-page"><PageTitle eyebrow="AGENT PROFILE CONTROL" title="Agent 配置" body="管理真实生效的岗位配置版本。" /><Empty title="配置尚未加载" body="请确认 Runtime API 已升级到最新数据库版本。" /></section>
-  const model = draft.model || {}
-  return <section className="server-page"><PageTitle eyebrow="AGENT PROFILE CONTROL" title="Agent 配置" body="编辑、校验、发布和回滚服务端 Profile；新 Run 会使用已发布配置语义。" /><ModelConnection /><nav className="server-agent-tabs">{profiles.map(item => <button key={item.agent_key} className={agent === item.agent_key ? 'active' : ''} onClick={() => setAgent(item.agent_key)}><span>{item.agent_key}</span><div><strong>{String(item.config.role_name)}</strong><small>发布版本 {item.published_version}</small></div><StatusPill value={item.status} /></button>)}</nav><div className="server-config-layout"><main><header><div><span>{selected.agent_key} PROFILE</span><h2>{String(draft.role_name || selected.agent_key)}</h2></div><StatusPill value={selected.status} /></header><div className="server-form-grid"><label>模型<input value={String(model.model || '')} onChange={event => setDraft({ ...draft, model: { ...model, model: event.target.value } })} /></label><label>推理等级<select value={String(model.reasoning_level || 'low')} onChange={event => setDraft({ ...draft, model: { ...model, reasoning_level: event.target.value } })}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label><label>最大轮数<input type="number" value={Number(model.max_turns || 1)} onChange={event => setDraft({ ...draft, model: { ...model, max_turns: Number(event.target.value) } })} /></label><label>超时秒数<input type="number" value={Number(model.timeout_seconds || 90)} onChange={event => setDraft({ ...draft, model: { ...model, timeout_seconds: Number(event.target.value) } })} /></label><label className="full">Memory 策略<textarea value={String(draft.memory_summary || '')} onChange={event => setDraft({ ...draft, memory_summary: event.target.value })} /></label></div><section className="server-config-facts"><div><span>岗位六件套</span><strong>{Array.isArray(draft.six_pack) ? draft.six_pack.length : 0}/6</strong></div><div><span>Skills</span><strong>{Array.isArray(draft.skills) ? draft.skills.filter((item: any) => item.enabled).length : 0}</strong></div><div><span>允许工具</span><strong>{Array.isArray(draft.permissions?.tools) ? draft.permissions.tools.length : 0}</strong></div></section><footer><button disabled={busy} onClick={() => void updateProfile(selected, draft, '八类工作台更新配置草稿')}><Save size={14} />保存草稿</button><button disabled={busy || selected.status !== 'draft'} onClick={() => void commandProfile(selected, 'validate')}><ShieldCheck size={14} />校验草稿</button><button className="primary" disabled={busy || selected.status !== 'validated'} onClick={() => void commandProfile(selected, 'publish')}><Sparkles size={14} />发布版本</button></footer></main><aside><h2>不可覆盖版本历史</h2>{selected.revisions.map(revision => <article key={revision.id}><header><strong>v{revision.version_no}</strong><StatusPill value={revision.status} /></header><p>{revision.summary}</p><small>{revision.created_by} · {dateTime(revision.created_at)}</small><button disabled={busy || revision.version_no === selected.published_version} onClick={() => void commandProfile(selected, 'rollback', revision.version_no)}>恢复为新草稿</button></article>)}</aside></div></section>
+  const dirty = JSON.stringify(draft) !== JSON.stringify(selected.config)
+  const enabledSkills = Array.isArray(draft.skills) ? draft.skills.filter((item: any) => item.enabled && item.status === 'ready').length : 0
+  const orderedProfiles = (['MO', 'PMA', 'BGA'] as const).map(key => profiles.find(item => item.agent_key === key)).filter((item): item is AgentProfile => Boolean(item))
+  return <section className="server-page"><PageTitle eyebrow="AGENT PROFILE CONTROL" title="Agent 配置" body="编辑、校验、发布和回滚服务端 Profile；已启动 Run 永远保留创建时快照。" /><ModelConnection /><nav className="server-agent-tabs" aria-label="Agent 岗位配置">{orderedProfiles.map(item => <button key={item.agent_key} className={agent === item.agent_key ? 'active' : ''} onClick={() => { setAgent(item.agent_key); setTab('overview') }}><span>{item.agent_key}</span><div><strong>{String(item.config.role_name)}</strong><small>发布版本 {item.published_version} · {item.published_hash?.slice(0, 10)}</small></div><StatusPill value={item.status} /></button>)}</nav><div className="server-config-layout"><main><header><div><span>{selected.agent_key} PROFILE</span><h2>{String(draft.role_name || selected.agent_key)}</h2></div><div className="server-config-state"><StatusPill value={selected.status} />{dirty && <em>尚未保存</em>}</div></header><section className="server-config-facts"><div><span>岗位六件套</span><strong>{Array.isArray(draft.six_pack) ? draft.six_pack.length : 0}/6</strong></div><div><span>生效 Skills</span><strong>{enabledSkills}</strong></div><div><span>允许工具</span><strong>{Array.isArray(draft.permissions?.tools) ? draft.permissions.tools.length : 0}</strong></div></section><nav className="server-profile-tabs" aria-label="配置分类">{([['overview', '基础与模型'], ['six_pack', '岗位六件套'], ['skills', 'Skills'], ['permissions', '工具与权限'], ['prompts', 'Prompt 模板']] as const).map(([key, label]) => <button type="button" key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</nav><div className="server-profile-editor">{tab === 'overview' && <ProfileOverviewEditor draft={draft} setDraft={setDraft} />}{tab === 'six_pack' && <SixPackEditor draft={draft} setDraft={setDraft} />}{tab === 'skills' && <SkillsEditor draft={draft} setDraft={setDraft} />}{tab === 'permissions' && <PermissionsEditor draft={draft} setDraft={setDraft} />}{tab === 'prompts' && <PromptEditor draft={draft} setDraft={setDraft} />}</div><label className="server-config-summary">版本说明<input value={summary} onChange={event => setSummary(event.target.value)} /></label><footer><button disabled={busy || !dirty || summary.trim().length < 2} onClick={() => void updateProfile(selected, draft, summary)}><Save size={14} />保存草稿</button><button disabled={busy || dirty || selected.status !== 'draft'} onClick={() => void commandProfile(selected, 'validate')}><ShieldCheck size={14} />校验草稿</button><button className="primary" disabled={busy || dirty || selected.status !== 'validated'} onClick={() => void commandProfile(selected, 'publish')}><Sparkles size={14} />发布版本</button></footer></main><aside><h2>不可覆盖版本历史</h2><p className="server-published-hash">当前发布快照<br /><code>{selected.published_hash}</code></p>{selected.revisions.map(revision => <article key={revision.id}><header><strong>v{revision.version_no}</strong><StatusPill value={revision.status} /></header><p>{revision.summary}</p><small>{revision.created_by} · {dateTime(revision.created_at)}</small><button disabled={busy || revision.version_no === selected.published_version} onClick={() => void commandProfile(selected, 'rollback', revision.version_no)}>恢复为新草稿</button></article>)}</aside></div></section>
+}
+
+function RunProfileSnapshot({ run }: { run: RunEvidence['run'] }) {
+  const snapshot = run.profile_snapshot || {}
+  const skills = Array.isArray(snapshot.skills) ? snapshot.skills.filter((item: any) => item.enabled && item.status === 'ready') : []
+  const sixPack = Array.isArray(snapshot.six_pack) ? snapshot.six_pack : []
+  const permissions = (snapshot.permissions || {}) as Record<string, any>
+  const prompts = (snapshot.prompt_templates || {}) as Record<string, any>
+  return <details className="server-run-profile"><summary>运行配置快照 <span>Profile v{run.profile_version || 'legacy'}</span></summary><div className="server-run-profile-grid"><article><span>配置哈希</span><code>{run.profile_hash || 'legacy'}</code></article><article><span>模型</span><strong>{String((snapshot.model as any)?.model || 'legacy')}</strong><small>{String((snapshot.model as any)?.reasoning_level || '—')} · {(snapshot.model as any)?.timeout_seconds || '—'}s</small></article><article><span>Prompt</span><strong>workflow {prompts.workflow?.version || '—'}</strong><small>chat {prompts.chat?.version || '—'}</small></article><article><span>权限</span><strong>{(permissions.tools || []).length} tools</strong><small>network={String(Boolean(permissions.network))}</small></article></div><section><h3>六件套</h3><div>{sixPack.map((item: any) => <span key={item.key}>{item.key}@{item.version} · {item.status}</span>)}</div></section><section><h3>生效 Skills</h3><div>{skills.map((item: any) => <span key={item.id}>{item.id}@{item.version} · {item.source}</span>)}</div></section><details><summary>原始快照 JSON</summary><pre>{JSON.stringify(snapshot, null, 2)}</pre></details></details>
 }
 
 function DiagnosticsPage() {
@@ -262,7 +420,7 @@ function DiagnosticsPage() {
     Promise.all(runRefs.map(async ref => [ref.resource_id, await loadRunEvidence(ref.resource_id)] as const)).then(items => { if (!cancelled) setEvidence(Object.fromEntries(items)) }).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [current?.id, current?.version])
-  return <section className="server-page"><PageTitle eyebrow="RUNTIME OBSERVABILITY" title="运行诊断" body="查看真实 Run、Attempt、Lease、Heartbeat、状态迁移和 Trace。" /><div className="server-diagnostic-summary"><article><Activity size={18} /><span>Runtime</span><strong>已连接</strong><small>{current?.correlation_id || '尚无当前案例'}</small></article><article><Bot size={18} /><span>模型</span><strong>{model?.model || '未读取'}</strong><small>{model?.execution_enabled ? '真实执行可用' : '仅合成执行'}</small></article><article><GitBranch size={18} /><span>Runs</span><strong>{runRefs.length}</strong><small>{loading ? '正在读取证据' : 'Attempt 与 Timeline 已加载'}</small></article><article><ShieldCheck size={18} /><span>发布边界</span><strong>SIMULATED</strong><small>external_effect=false</small></article></div>{Object.values(evidence).map(value => <article className="server-run" key={value.run.id}><header><div><span>{String(value.run.profile_id).toUpperCase()} · {STAGE_LABELS[value.run.stage_key || '']}</span><h2>{value.run.id}</h2></div><StatusPill value={value.run.status} />{value.run.trace_id && <a href={`http://127.0.0.1:16686/trace/${value.run.trace_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} />打开 Trace</a>}</header><dl><div><dt>Correlation</dt><dd>{value.run.correlation_id}</dd></div><div><dt>Execution</dt><dd>{value.run.execution_mode}</dd></div><div><dt>Started</dt><dd>{dateTime(value.run.started_at)}</dd></div><div><dt>Completed</dt><dd>{dateTime(value.run.completed_at)}</dd></div></dl><div className="server-run-timeline">{value.timeline.map(event => <span key={event.id}><i /><strong>{event.to_status}</strong><small>{dateTime(event.created_at)}</small></span>)}</div><details open><summary>Attempt 历史 <span>{value.attempts.length}</span></summary>{value.attempts.map(attempt => <article className="server-attempt" key={attempt.id}><header><strong>Attempt {attempt.attempt_no}</strong><StatusPill value={attempt.status} /></header><dl><div><dt>Worker</dt><dd>{attempt.worker_id}</dd></div><div><dt>Heartbeat</dt><dd>{dateTime(attempt.heartbeat_at)}</dd></div><div><dt>Lease until</dt><dd>{dateTime(attempt.lease_until)}</dd></div><div><dt>Retryability</dt><dd>{attempt.retryability}</dd></div></dl>{(attempt.failure_class || Object.keys(attempt.failure || {}).length > 0) && <pre>{JSON.stringify({ failure_class: attempt.failure_class, ...attempt.failure }, null, 2)}</pre>}</article>)}</details></article>)}{!runRefs.length && <Empty title="当前案例还没有 Run" body="在任务中心启动 MO/PMA/BGA 后，执行证据会显示在这里。" />}</section>
+  return <section className="server-page"><PageTitle eyebrow="RUNTIME OBSERVABILITY" title="运行诊断" body="查看真实 Run、配置快照、Attempt、Lease、Heartbeat、状态迁移和 Trace。" /><div className="server-diagnostic-summary"><article><Activity size={18} /><span>Runtime</span><strong>已连接</strong><small>{current?.correlation_id || '尚无当前案例'}</small></article><article><Bot size={18} /><span>模型</span><strong>{model?.model || '未读取'}</strong><small>{model?.execution_enabled ? '真实执行可用' : '仅合成执行'}</small></article><article><GitBranch size={18} /><span>Runs</span><strong>{runRefs.length}</strong><small>{loading ? '正在读取证据' : 'Attempt 与 Timeline 已加载'}</small></article><article><ShieldCheck size={18} /><span>发布边界</span><strong>SIMULATED</strong><small>external_effect=false</small></article></div>{Object.values(evidence).map(value => <article className="server-run" key={value.run.id}><header><div><span>{String(value.run.profile_id).toUpperCase()} · {value.run.purpose === 'chat' ? '真实岗位对话' : STAGE_LABELS[value.run.stage_key || '']}</span><h2>{value.run.id}</h2></div><StatusPill value={value.run.status} />{value.run.trace_id && <a href={`http://127.0.0.1:16686/trace/${value.run.trace_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} />打开 Trace</a>}</header><dl><div><dt>Purpose</dt><dd>{value.run.purpose || 'workflow'}</dd></div><div><dt>Profile</dt><dd>v{value.run.profile_version || 'legacy'}</dd></div><div><dt>Correlation</dt><dd>{value.run.correlation_id}</dd></div><div><dt>Execution</dt><dd>{value.run.execution_mode}</dd></div><div><dt>Started</dt><dd>{dateTime(value.run.started_at)}</dd></div><div><dt>Completed</dt><dd>{dateTime(value.run.completed_at)}</dd></div></dl><RunProfileSnapshot run={value.run} /><div className="server-run-timeline">{value.timeline.map(event => <span key={event.id}><i /><strong>{event.to_status}</strong><small>{dateTime(event.created_at)}</small></span>)}</div><details open><summary>Attempt 历史 <span>{value.attempts.length}</span></summary>{value.attempts.map(attempt => <article className="server-attempt" key={attempt.id}><header><strong>Attempt {attempt.attempt_no}</strong><StatusPill value={attempt.status} /></header><dl><div><dt>Worker</dt><dd>{attempt.worker_id}</dd></div><div><dt>Heartbeat</dt><dd>{dateTime(attempt.heartbeat_at)}</dd></div><div><dt>Lease until</dt><dd>{dateTime(attempt.lease_until)}</dd></div><div><dt>Retryability</dt><dd>{attempt.retryability}</dd></div></dl>{(attempt.failure_class || Object.keys(attempt.failure || {}).length > 0) && <pre>{JSON.stringify({ failure_class: attempt.failure_class, ...attempt.failure }, null, 2)}</pre>}</article>)}</details></article>)}{!runRefs.length && <Empty title="当前案例还没有 Run" body="在任务中心启动 MO/PMA/BGA 或在协作中心发起真实对话后，执行证据会显示在这里。" />}</section>
 }
 
 export function ServerWorkspacePage({ view, navigate }: { view: ViewKey; navigate: (view: ViewKey) => void }) {
@@ -272,7 +430,7 @@ export function ServerWorkspacePage({ view, navigate }: { view: ViewKey; navigat
   return <div className="server-embedded-workspace">
     <GlobalCaseBar onNew={() => setCreateOpen(true)} />
     {view === 'tasks' && <TaskPage onNew={() => setCreateOpen(true)} navigate={navigate} />}
-    {view === 'collaboration' && <CollaborationPage />}
+    {view === 'collaboration' && <CollaborationPage navigate={navigate} />}
     {view === 'objects' && <ObjectsPage />}
     {view === 'reviews' && <ReviewsPage />}
     {view === 'holds' && <HoldsPage />}
@@ -294,9 +452,13 @@ function Shell() {
   function navigate(next: ViewKey) {
     setView(next); setMobile(false)
     const url = new URL(window.location.href); url.searchParams.set('view', next); window.history.replaceState({}, '', url)
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+      document.getElementById('main-content')?.focus({ preventScroll: true })
+    })
   }
   const pending = current?.status === 'awaiting_human' || current?.status === 'blocked' ? 1 : 0
-  return <div className="app-shell server-workspace"><button className="server-mobile-menu" onClick={() => setMobile(true)}><Menu size={18} /></button>{mobile && <button className="nav-scrim" onClick={() => setMobile(false)} />}<aside className={`sidebar ${mobile ? 'sidebar-open' : ''}`}><header className="brand-block"><div className="brand-mark"><span>S2</span></div><div><strong>营销组织运行台</strong><small>server-backed workspace</small></div><button className="icon-button sidebar-close" onClick={() => setMobile(false)}><X size={17} /></button></header><div className="environment-note"><Activity size={14} /><div><strong>真实 Runtime</strong><small>八类页面统一服务端状态</small></div></div><nav className="main-nav"><p>工作台</p>{NAV.map(item => { const Icon = item.icon; return <button key={item.key} className={view === item.key ? 'active' : ''} onClick={() => navigate(item.key)}><Icon size={18} /><span>{item.label}</span>{item.key === 'tasks' && pending > 0 && <em>{pending}</em>}</button> })}</nav><footer className="sidebar-footer"><button onClick={() => setCreateOpen(true)}><Plus size={16} /><span>建立新营销任务</span></button><div className="boundary-line"><ShieldCheck size={14} /><span>平台发布 simulated · 人类最终决策</span></div></footer></aside><div className="main-area"><header className="server-topbar"><div><span>1Cat Marketing OS</span><ChevronRight size={13} /><strong>{NAV.find(item => item.key === view)?.label}</strong></div><span className="server-truth-badge"><Database size={13} />SERVER SOURCE OF TRUTH</span></header><main className="main-content server-main"><ServerWorkspacePage view={view} navigate={navigate} /></main></div><CreateCaseDialog open={createOpen} onClose={() => setCreateOpen(false)} /></div>
+  return <div className="app-shell server-workspace"><button className="server-mobile-menu" aria-label="打开主导航" aria-expanded={mobile} aria-controls="server-sidebar" onClick={() => setMobile(true)}><Menu size={18} /></button>{mobile && <button className="nav-scrim" aria-label="关闭主导航" onClick={() => setMobile(false)} />}<aside id="server-sidebar" className={`sidebar ${mobile ? 'sidebar-open' : ''}`}><header className="brand-block"><div className="brand-mark"><span>S2</span></div><div><strong>营销组织运行台</strong><small>server-backed workspace</small></div><button className="icon-button sidebar-close" aria-label="关闭主导航" onClick={() => setMobile(false)}><X size={17} /></button></header><div className="environment-note"><Activity size={14} /><div><strong>真实 Runtime</strong><small>八类页面统一服务端状态</small></div></div><nav className="main-nav" aria-label="主要导航"><p>工作台</p>{NAV.map(item => { const Icon = item.icon; return <button key={item.key} className={view === item.key ? 'active' : ''} aria-current={view === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}><Icon size={18} /><span>{item.label}</span>{item.key === 'tasks' && pending > 0 && <em>{pending}</em>}</button> })}</nav><footer className="sidebar-footer"><button onClick={() => setCreateOpen(true)}><Plus size={16} /><span>建立新营销任务</span></button><div className="boundary-line"><ShieldCheck size={14} /><span>平台发布 simulated · 人类最终决策</span></div></footer></aside><div className="main-area"><header className="server-topbar"><div><span>1Cat Marketing OS</span><ChevronRight size={13} /><strong>{NAV.find(item => item.key === view)?.label}</strong></div><span className="server-truth-badge"><Database size={13} />SERVER SOURCE OF TRUTH</span></header><main id="main-content" className="main-content server-main" tabIndex={-1}><ServerWorkspacePage view={view} navigate={navigate} /></main></div><CreateCaseDialog open={createOpen} onClose={() => setCreateOpen(false)} /></div>
 }
 
 export default function ServerWorkspace() {

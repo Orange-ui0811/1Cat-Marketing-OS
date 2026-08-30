@@ -1,4 +1,3 @@
-import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -8,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import AuditLog, IdempotencyRecord
+from .hashing import canonical_hash
 from .security import Actor
 
 
@@ -17,11 +17,6 @@ class WriteContext:
     correlation_id: str
     idempotency_key: str
     request_hash: str
-
-
-def canonical_hash(value: object) -> str:
-    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 PII_PATTERNS = (

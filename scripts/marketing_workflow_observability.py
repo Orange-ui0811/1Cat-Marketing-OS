@@ -24,7 +24,8 @@ from observability_acceptance import (
 from real_agent_demo import ROOT, call, login
 
 
-EVIDENCE = ROOT / ".runtime" / "evidence" / "marketing-workflow-observability-latest.json"
+EVIDENCE_DIR = ROOT / ".runtime" / "evidence"
+LATEST_EVIDENCE = EVIDENCE_DIR / "marketing-workflow-observability-latest.json"
 EXPECTED_STAGES = {"mo_plan", "pma", "bga", "mo_retrospective"}
 
 
@@ -195,6 +196,22 @@ def inspect_case(case_id: str, *, trace_wait_seconds: int, log_since: str) -> di
             "publishing": "simulated", "external_effect": False, "pii": False, "business_outcome_claimed": False,
         },
     }
+
+
+def write_evidence(result: dict[str, Any]) -> list[Path]:
+    """Preserve mode-specific evidence and only advance canonical latest on a full pass."""
+    mode = str(result.get("execution_mode") or "unknown")
+    if mode not in {"synthetic", "real"}:
+        mode = "unknown"
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    mode_path = EVIDENCE_DIR / f"marketing-workflow-observability-{mode}-latest.json"
+    mode_path.write_text(payload, encoding="utf-8")
+    paths = [mode_path]
+    if result.get("passed") is True:
+        LATEST_EVIDENCE.write_text(payload, encoding="utf-8")
+        paths.append(LATEST_EVIDENCE)
+    return paths
     return {
         "checked_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "passed": all(checks.values()),
@@ -221,10 +238,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-since", default="30m")
     args = parser.parse_args(argv)
     result = inspect_case(args.case_id, trace_wait_seconds=args.trace_wait_seconds, log_since=args.log_since)
-    EVIDENCE.parent.mkdir(parents=True, exist_ok=True)
-    EVIDENCE.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    evidence_paths = write_evidence(result)
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
-    print(f"Evidence: {EVIDENCE}", flush=True)
+    for path in evidence_paths:
+        print(f"Evidence: {path}", flush=True)
+    if result["passed"] is not True:
+        print("Canonical latest evidence was not replaced because this acceptance did not fully pass.", flush=True)
     return 0 if result["passed"] else 2
 
 

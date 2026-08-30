@@ -16,6 +16,7 @@ from candidate_contract import (
 )
 from commitment_contract import CommitmentAction, target_commitment_status
 from observability import configure_observability, metrics
+from run_purpose_contract import require_workflow_write
 
 RUNTIME = os.getenv("RUNTIME_API_URL", "http://runtime-api:8000")
 KEYCLOAK = os.getenv("KEYCLOAK_TOKEN_URL", "http://keycloak:8080/auth/realms/1cat/protocol/openid-connect/token")
@@ -193,7 +194,8 @@ def commitment_read(role_id: str, profile_id: str, commitment_id: str, attempt_i
 def commitment_respond(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
                        action: CommitmentAction, reason: str) -> dict:
     """单步响应Commitment。action仅可为accept/activate/wait/submit/request_takeover/pause；不能自行fulfilled。"""
-    assert_context(role_id, profile_id, commitment_id, attempt_id)
+    run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    require_workflow_write(run)
     target = target_commitment_status(action)
     current = commitment_read(role_id, profile_id, commitment_id, attempt_id)
     if current.get("proposed_role") != role_id and current.get("committed_role") != role_id:
@@ -217,6 +219,7 @@ def object_create_candidate(role_id: str, profile_id: str, commitment_id: str, a
                             kind: CandidateKind, title: str, body: str, source_refs: list[str]) -> dict:
     """创建候选对象。PMA仅brief/evidence/fact/claim；BGA仅campaign/content/review；MO仅review。"""
     run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    require_workflow_write(run)
     validate_candidate_kind(role_id, kind)
     metadata = candidate_metadata(role_id, commitment_id, attempt_id, run)
     return request("POST", "/v1/knowledge", correlation_id=f"{attempt_id}-{uuid.uuid4().hex}", payload={
@@ -229,7 +232,8 @@ def object_create_candidate(role_id: str, profile_id: str, commitment_id: str, a
 def handoff_create(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
                    recipient: str, purpose: str, payload: dict) -> dict:
     """创建岗位交接；发送成功不代表接收者接受。"""
-    assert_context(role_id, profile_id, commitment_id, attempt_id)
+    run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    require_workflow_write(run)
     return request("POST", "/v1/handoffs", correlation_id=f"{attempt_id}-{uuid.uuid4().hex}", payload={
         "commitment_id": commitment_id, "sender_role": role_id, "recipient": recipient,
         "purpose": purpose, "payload": payload,
@@ -252,6 +256,7 @@ def manual_publish_task_create(role_id: str, profile_id: str, commitment_id: str
                                platform: str, object_ref: dict, instructions: str) -> dict:
     """创建不可变人工发布任务。该Tool不会登录或写入任何内容平台。"""
     run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    require_workflow_write(run)
     validate_manual_publish_context(role_id, run)
     if platform == "wechat_channels":
         raise ValueError("SKL-BG-11/video channel is dormant in R0")
@@ -278,7 +283,8 @@ def manual_publish_receipt_read(role_id: str, profile_id: str, commitment_id: st
 def lead_stub_create(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
                      source_record_ref: str, touchpoint: str, campaign_ref: str, content_ref: str) -> dict:
     """创建不含姓名、手机、邮箱或对话正文的LeadStub；不判断询盘有效性。"""
-    assert_context(role_id, profile_id, commitment_id, attempt_id)
+    run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    require_workflow_write(run)
     if role_id != "DROLE-02":
         raise ValueError("only BGA may register a LeadStub")
     return request("POST", "/v1/leads", correlation_id=f"{attempt_id}-{uuid.uuid4().hex}", payload={
@@ -298,7 +304,8 @@ def sales_feedback_read(role_id: str, profile_id: str, commitment_id: str, attem
 def memory_write_bounded(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
                          category: str, fact: str, source_ref: str) -> dict:
     """写入少量耐久Memory；API会拒绝明显手机号与邮箱。"""
-    assert_context(role_id, profile_id, commitment_id, attempt_id)
+    run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    require_workflow_write(run)
     return request("POST", "/v1/memory", correlation_id=f"{attempt_id}-{uuid.uuid4().hex}", payload={
         "profile_id": profile_id, "category": category, "fact": fact, "source_ref": source_ref,
     })
@@ -308,7 +315,8 @@ def memory_write_bounded(role_id: str, profile_id: str, commitment_id: str, atte
 def risk_escalate(role_id: str, profile_id: str, commitment_id: str, attempt_id: str,
                   reason: str, evidence_refs: list[str]) -> dict:
     """创建人工接管事件；不自行作出业务批准。"""
-    assert_context(role_id, profile_id, commitment_id, attempt_id)
+    run = assert_context(role_id, profile_id, commitment_id, attempt_id)
+    require_workflow_write(run)
     return request("POST", "/v1/events", correlation_id=f"{attempt_id}-{uuid.uuid4().hex}", payload={
         "event_type": "risk.manual_takeover.requested",
         "payload": {"role_id": role_id, "profile_id": profile_id, "commitment_id": commitment_id,

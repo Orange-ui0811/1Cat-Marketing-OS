@@ -18,9 +18,10 @@ R0 只生成候选、协作、审核和人工发布任务。抖音、小红书�
 ./bin/1cat e2e
 ```
 
-打开 <http://localhost:8080>。默认保留原有八类协作工作台，包括直接与 MO/PMA/BGA 对话、
-计划卡、岗位任务、角色切换、六件套和 Skills；顶部“协作设计 / 真实任务”切换让同一组八类导航
-进入服务端 Marketing Case、人工门禁、最终方案和运行证据。PMA Runtime 研修页位于
+打开 <http://localhost:8080>。八类页面默认直接使用 Runtime 服务端事实，包括与 MO/PMA/BGA
+对话、计划卡、岗位任务、案例与对象历史、人工门禁、Profile 版本和运行证据；不再需要切换
+“协作设计 / 真实任务”。旧界面仅保留在明确标注的 `?mode=prototype` 参考入口，不会写入服务端。
+PMA Runtime 研修页位于
 <http://localhost:8080/?view=runtime>。首次登录用户为 `admin`，密码在
 初始化后写入 `.env` 的 `INITIAL_ADMIN_PASSWORD`；不要复制到文档、日志或部署包。
 
@@ -78,7 +79,7 @@ Markdown；最后一次人工确认会批准该方案的明确版本。Agent 只
 
 ### 八类页面如何分工
 
-每个页面都有两层能力：“协作设计”保留原工作台交互，“真实任务”使用 Runtime 服务端事实。
+八类页面共用同一个 Runtime Case 和登录会话，正常入口只有一套服务端事实。
 
 - **任务中心**：新建 Brief、启动 MO/PMA/BGA、完成模拟人工发布、登记合成反馈。
 - **协作中心**：围绕当前 Case 留言，查看 Commitment 与 Handoff 的服务端记录。
@@ -86,8 +87,10 @@ Markdown；最后一次人工确认会批准该方案的明确版本。Agent 只
 - **决策台账**：审阅对象版本，批准、退回修改、HOLD 或人工接管，并保留正式理由。
 - **异常处置**：查看失败事实，执行安全重试、暂停恢复、Unknown 人工对账或取消。
 - **Daily Brief**：按待人工、运行中、异常、已完成聚合全部服务端案例。
-- **Agent 配置**：维护 PMA/BGA/MO 的服务端 Profile 草稿，校验、发布和回滚版本。
-- **运行诊断**：按 Case 查看 Run、Attempt、Lease、Heartbeat、状态时间线与 Trace。
+- **Agent 配置**：维护 PMA/BGA/MO 的基础模型、岗位六件套、Skill、工具权限、Memory 策略和 workflow/chat Prompt；配置必须经过草稿、校验、发布，可从历史版本恢复为新草稿。
+- **运行诊断**：按 Case 查看 Run、不可覆盖的 Profile 版本/哈希/完整配置快照、Attempt、Lease、Heartbeat、状态时间线与 Trace。
+
+Profile 的草稿和已发布版本严格隔离：保存草稿不会影响正在执行或随后创建的 Run，只有发布成功后新建 Run 才会固化新版本；安全重试继续继承原 Run 快照，不会静默升级配置。Profile 中声明的权限只能收窄能力，Runtime、MCP 和人工门禁始终取更严格边界。
 
 `/?view=workflow` 只保留为独立服务端视图的兼容入口；正常操作无需离开原八类工作台。
 

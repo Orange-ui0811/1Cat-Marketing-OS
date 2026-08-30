@@ -11,10 +11,11 @@
 ```mermaid
 flowchart TB
   Human[人类操作者\n创建 Commitment / 最终确认]
-  UI[统一 Workspace\nDemo1 + Runtime 时间线]
+  UI[八类服务端 Workspace\n任务 · 协作 · 对象 · 决策 · 配置 · 诊断]
   KC[Keycloak\nOIDC / RBAC]
   API[Runtime API\n幂等 / 状态机 / 审计]
-  PG[(PostgreSQL\nRun / Attempt / Timeline)]
+  PG[(PostgreSQL\nCase / Message / Profile / Run / Attempt)]
+  Profile[Agent Profile Service\nDraft · Validate · Publish · Rollback]
   Worker[Runtime Worker\nClaim / Lease / Heartbeat / Recovery]
   Hermes[Hermes PMA · BGA · MO\n独立 Profile]
   Gateway[Model Gateway\n本地读取 Secret]
@@ -25,6 +26,7 @@ flowchart TB
   Human --> UI
   UI --> KC
   UI --> API
+  UI --> Profile --> API
   API <--> PG
   Worker <--> PG
   Worker --> Hermes
@@ -36,9 +38,10 @@ flowchart TB
   API --> UI
 ```
 
-前端只展示服务端事实并提交人类动作；Runtime API 是统一写入边界；Worker 不拥有业务最终
+正式前端只展示服务端事实并提交人类动作，旧Reducer界面仅在 `?mode=prototype` 隔离；Runtime API 是统一写入边界；Worker 不拥有业务最终
 决定权；Hermes 只能通过岗位白名单 MCP 读写候选对象；DeepSeek Key 不进入浏览器、Profile、
-镜像或日志。
+镜像或日志。每个工作流或聊天 Run 固化已发布 Profile 的 version、hash 和完整快照，后续草稿
+或发布不会改写历史执行上下文。
 
 ## 三 Agent 业务状态机
 
@@ -89,6 +92,9 @@ stateDiagram-v2
 | 真实 Agent | PMA、BGA、MO 三岗位 DeepSeek Run 3/3 完成，共写入 7 个授权候选对象 |
 | 完整业务 Case | 合成模式 9 阶段/4 Run 确定性通过；真实模式完成并保留 1 次安全重试历史 |
 | 人类协作对象 | 真实 Case 持久化 4 Commitment、2 Handoff、6 Approval、1 simulated 回执 |
+| 八类服务端工作区 | 任务、协作、对象、决策、异常、Daily、配置、诊断统一读取服务端事实；前端回归 10/10 |
+| Agent 协作 | MO/PMA/BGA 消息、Change Request、Handoff、chat Run、回复与对象谱系均持久化 |
+| 配置复现 | Profile 六件套/Skill/权限/Prompt 可版本发布；Run 固化 version/hash/snapshot，草稿不泄漏 |
 | 并发执行 | 4 Worker 处理 20 条合成 Run，重复有效执行 0 |
 | 故障恢复 | 派发前 Worker kill 产生 `lost → succeeded`；派发后进入 `unknown/unsafe` |
 | 数据库韧性 | claim 前与 Heartbeat 期间各短暂断库 6 秒，均恢复且没有重复 Attempt |
@@ -110,6 +116,8 @@ stateDiagram-v2
   岗位工具并做上下文二次校验。
 - MCP Trace 使用 Span Link：异步/独立调用无法保持可靠父子上下文时，显式关联而不伪造
   连续 Trace。
+- Profile 使用发布快照：配置草稿与运行事实分离；新 Run 只读取已发布 bundle，安全重试继承
+  原快照，从而保证历史可解释且不发生静默升级。
 
 ## 明确边界
 

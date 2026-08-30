@@ -216,7 +216,22 @@ def tool_contract_instruction(profile_id: str) -> str:
     )
 
 
-def profile_instructions(profile_id: str, commitment_id: str, attempt_id: str) -> str:
+PROFILE_FILE_BY_PACK_KEY = {
+    "role_manifest": "ROLE_MANIFEST.md",
+    "soul": "SOUL.md",
+    "skill_pack": None,
+    "memory_policy": "MEMORY_POLICY.md",
+    "daily_operation": "DAILY_OPERATION.md",
+    "evaluation": None,
+}
+
+
+def profile_instructions(
+    profile_id: str,
+    commitment_id: str,
+    attempt_id: str,
+    profile_snapshot: dict,
+) -> str:
     """Build a stable, read-only prompt from the signed profile bundle.
 
     Hermes' mutable skill management tool is intentionally disabled. R0 skills
@@ -229,19 +244,83 @@ def profile_instructions(profile_id: str, commitment_id: str, attempt_id: str) -
         "任何产出只能创建候选或送审；运行成功最多把Commitment推进到submitted，不能声称已发布、已履约或已完成业务验收。",
         tool_contract_instruction(profile_id),
     ]
-    for name in ("SOUL.md", "ROLE_MANIFEST.md", "DAILY_OPERATION.md", "MEMORY_POLICY.md", "TOOL_ALLOWLIST.md"):
+    permissions = dict(profile_snapshot.get("permissions") or {})
+    parts.append(
+        "已发布Profile权限声明："
+        f"tools={permissions.get('tools') or []}；network={bool(permissions.get('network'))}；"
+        f"terminal={bool(permissions.get('terminal'))}；browser={bool(permissions.get('browser'))}。"
+        "实际权限仍由Runtime和MCP fail-closed策略取更严格值。"
+    )
+    configured_pack = {
+        str(item.get("key"))
+        for item in profile_snapshot.get("six_pack", [])
+        if isinstance(item, dict) and item.get("status") == "ready"
+    }
+    file_names = [
+        file_name for key, file_name in PROFILE_FILE_BY_PACK_KEY.items()
+        if file_name and (not configured_pack or key in configured_pack)
+    ]
+    file_names.append("TOOL_ALLOWLIST.md")
+    for name in file_names:
         path = os.path.join(root, name)
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as handle:
                 parts.append(f"\n## {name}\n{handle.read()}")
+    enabled_skills = [
+        item for item in profile_snapshot.get("skills", [])
+        if isinstance(item, dict) and item.get("enabled") and item.get("status") == "ready"
+    ]
+    skill_names = [os.path.basename(str(item.get("source") or item.get("id"))) for item in enabled_skills]
+    parts.append(f"已发布Profile启用Skill来源={sorted(set(skill_names)) or ['none']}。")
     skills_root = os.path.join(root, "skills")
     if os.path.isdir(skills_root):
-        for skill_name in sorted(os.listdir(skills_root)):
+        for skill_name in sorted(set(skill_names)):
             path = os.path.join(skills_root, skill_name, "SKILL.md")
             if os.path.isfile(path):
                 with open(path, encoding="utf-8") as handle:
                     parts.append(f"\n## Skill {skill_name}\n{handle.read()}")
+            else:
+                parts.append(f"\n## Skill {skill_name}\n配置引用未在受信Profile目录中找到；本次Run不得假装已加载该Skill。")
+    workflow_template = dict((profile_snapshot.get("prompt_templates") or {}).get("workflow") or {})
+    if workflow_template.get("body"):
+        parts.append(
+            f"\n## Published workflow prompt {workflow_template.get('version', 'unknown')}\n"
+            f"{workflow_template['body']}"
+        )
     return "\n".join(parts)
+
+
+def chat_profile_instructions(
+    profile_id: str,
+    commitment_id: str,
+    attempt_id: str,
+    profile_snapshot: dict,
+) -> str:
+    """Build a bounded read-only prompt for an interactive Agent chat turn."""
+    role_name = str(profile_snapshot.get("role_name") or profile_id.upper())
+    enabled_skills = [
+        str(item.get("id"))
+        for item in profile_snapshot.get("skills", [])
+        if isinstance(item, dict) and item.get("enabled") and item.get("id")
+    ]
+    memory_summary = str(profile_snapshot.get("memory_summary") or "无额外岗位记忆策略")
+    permissions = dict(profile_snapshot.get("permissions") or {})
+    chat_template = dict((profile_snapshot.get("prompt_templates") or {}).get("chat") or {})
+    return "\n".join([
+        "1Cat真实Agent协作对话。你正在回答案例中的人类消息，不是在执行营销工作流阶段。",
+        f"当前岗位={role_name}（{profile_id}）。请使用该岗位的专业视角，直接、清楚地回答用户问题。",
+        f"只读Tool上下文固定为 role_id={ROLE[profile_id]}、profile_id={profile_id}、"
+        f"commitment_id={commitment_id}、attempt_id={attempt_id}。",
+        "如需核对案例事实，只能使用organization-runtime MCP的只读Tool。",
+        "严禁创建或修改Commitment、Knowledge候选、Handoff、人工发布任务、Lead、Memory或风险事件；"
+        "严禁声称已经审批、发布、履约或改变案例状态。",
+        "不要调用终端、文件、浏览器、任意HTTP、Cron、A2A或平台连接器。",
+        "回答必须区分服务端已记录事实、合理建议和仍需人工确认的事项。",
+        f"已发布Profile启用的Skill标识={enabled_skills or ['none']}。",
+        f"已发布Profile只读工具声明={permissions.get('tools') or []}；实际权限取Runtime更严格值。",
+        f"Profile Memory Policy摘要={memory_summary}",
+        f"Published chat prompt {chat_template.get('version', 'legacy')}={chat_template.get('body') or '无额外模板'}",
+    ])
 
 
 def canonical_hash(value: object) -> str:
@@ -468,6 +547,7 @@ async def execute_hermes(claim: AttemptClaim) -> None:
         mark_running(db, claim)
         attempt = db.get(AgentRunAttempt, claim.attempt_id)
         profile_id, input_text = run.profile_id, run.input_text
+        run_purpose = run.purpose
         profile_snapshot = dict(run.profile_snapshot or {})
         profile_version = run.profile_version
         commitment_id = run.commitment_id
@@ -498,9 +578,19 @@ async def execute_hermes(claim: AttemptClaim) -> None:
                 claim=claim,
                 lease_lost=lease_lost,
             )
+            instructions = (
+                chat_profile_instructions(
+                    profile_id,
+                    commitment_id,
+                    claim.attempt_id,
+                    profile_snapshot,
+                )
+                if run_purpose == "chat"
+                else profile_instructions(profile_id, commitment_id, claim.attempt_id, profile_snapshot)
+            )
             response = await client.post(f"{url}/v1/runs", headers=headers, json={
                 "input": input_text,
-                "instructions": profile_instructions(profile_id, commitment_id, claim.attempt_id) + profile_note,
+                "instructions": instructions + profile_note,
                 "session_id": claim.run_id,
             })
             response.raise_for_status()

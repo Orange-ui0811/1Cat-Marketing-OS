@@ -39,6 +39,10 @@ def test_commitment_state_and_run_boundary(client, write_headers, auth_headers):
     })
     assert run.status_code == 202 and run.json()["status"] == "queued"
     assert run.json()["trace_id"] == "0123456789abcdef0123456789abcdef"
+    assert run.json()["profile_version"] == 1
+    assert run.json()["profile_hash"]
+    assert run.json()["profile_snapshot"]["agent"] == "PMA"
+    assert run.json()["profile_snapshot"]["prompt_templates"]["workflow"]["version"] == "v1.0"
 
 
 def test_idempotency_conflict(client, write_headers):

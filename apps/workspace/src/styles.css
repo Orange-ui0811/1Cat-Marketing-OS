@@ -2,37 +2,49 @@
 
 :root {
   font-family: "Segoe UI Variable", "Aptos", "Microsoft YaHei UI", sans-serif;
-  color: #20352f;
-  background: #f1eee6;
+  color: #132f32;
+  background: #f4f7f8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --canvas: #f1eee6;
-  --paper: #fbfaf6;
-  --paper-deep: #e9e4d9;
-  --ink: #1a302a;
-  --muted: #6b7a75;
-  --faint: #929c98;
-  --forest: #173b32;
-  --forest-2: #245647;
-  --teal: #367e6b;
-  --terracotta: #b85f47;
-  --amber: #b58038;
-  --blue: #557993;
-  --line: #d9d6cd;
-  --line-dark: #c6c5bd;
-  --shadow: 0 16px 45px rgba(35, 55, 48, .09);
-  --sidebar: 244px;
-  --topbar: 68px;
+  --canvas: #f4f7f8;
+  --paper: #ffffff;
+  --paper-deep: #e8eef0;
+  --ink: #132f32;
+  --muted: #53686d;
+  --faint: #6d8085;
+  --forest: #123c3a;
+  --forest-2: #1d5b56;
+  --teal: #277a71;
+  --terracotta: #a94f3b;
+  --amber: #9a671d;
+  --blue: #2f6f9f;
+  --line: #dce4e6;
+  --line-dark: #bdcacc;
+  --shadow: 0 12px 32px rgba(18, 60, 58, .08);
+  --shadow-soft: 0 4px 14px rgba(18, 60, 58, .06);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --sidebar: 236px;
+  --topbar: 64px;
 }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body { margin: 0; min-width: 320px; min-height: 100dvh; background: var(--canvas); }
+body { margin: 0; min-width: 320px; min-height: 100dvh; overflow-x: hidden; background: var(--canvas); }
 body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; opacity: .34; background-image: radial-gradient(circle at 14% 8%, rgba(255,255,255,.95), transparent 28%), radial-gradient(circle at 82% 0%, rgba(65,105,91,.09), transparent 25%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E"); }
 button, input, textarea, select { font: inherit; }
+button, [role="button"] { touch-action: manipulation; }
+button:disabled { cursor: not-allowed !important; opacity: .52; }
 button { color: inherit; }
 button, a, input, textarea, select { outline: none; }
-button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 0 0 0 3px rgba(54,126,107,.25); }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; box-shadow: 0 0 0 4px rgba(39,122,113,.18); }
 button { transition: transform .18s ease, color .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease; }
 button:active:not(:disabled) { transform: translateY(1px) scale(.99); }
 ::selection { color: white; background: var(--teal); }
@@ -61,8 +73,8 @@ button:active:not(:disabled) { transform: translateY(1px) scale(.99); }
 .main-nav button.active { border-left-color: #e3c88f; color: var(--forest); background: #eee8dc; font-weight: 650; box-shadow: 0 6px 18px rgba(9,28,23,.14); }
 .main-nav button em { min-width: 19px; margin-left: auto; padding: 2px 5px; border-radius: 99px; color: white; background: var(--terracotta); font-family: Consolas, monospace; font-size: 8px; font-style: normal; text-align: center; }
 .sidebar-footer { position: relative; padding: 12px 14px 16px; border-top: 1px solid rgba(255,255,255,.08); }
-.sidebar-footer > button { width: 100%; min-height: 39px; padding: 0 10px; display: flex; justify-content: center; align-items: center; gap: 7px; border: 1px solid rgba(232,217,185,.4); border-radius: 8px; color: #f0e5cc; background: rgba(232,217,185,.08); cursor: pointer; font-size: 10px; font-weight: 650; }
-.sidebar-footer > button:hover { background: rgba(232,217,185,.15); }
+.sidebar-footer > button, .sidebar-footer > a { width: 100%; min-height: 39px; padding: 0 10px; display: flex; justify-content: center; align-items: center; gap: 7px; border: 1px solid rgba(232,217,185,.4); border-radius: 8px; color: #f0e5cc; background: rgba(232,217,185,.08); cursor: pointer; font-size: 10px; font-weight: 650; text-decoration: none; }
+.sidebar-footer > button:hover, .sidebar-footer > a:hover { background: rgba(232,217,185,.15); }
 .boundary-line { margin-top: 11px; display: flex; align-items: center; gap: 6px; color: #739187; font-size: 8px; line-height: 1.4; }
 .main-area { min-height: 100dvh; margin-left: var(--sidebar); }
 .topbar { position: sticky; top: 0; z-index: 30; height: var(--topbar); padding: 0 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(198,197,189,.8); background: rgba(251,250,246,.86); backdrop-filter: blur(18px); }
@@ -73,7 +85,7 @@ button:active:not(:disabled) { transform: translateY(1px) scale(.99); }
 .workspace-surface-switch { padding: 3px; display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 8px; background: #ece9e0; }
 .workspace-surface-switch button { min-height: 31px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 8px; font-weight: 700; }
 .workspace-surface-switch button.active { color: white; background: var(--forest-2); box-shadow: 0 4px 12px rgba(17,54,45,.16); }
-.quiet-action { min-height: 34px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 9px; }
+.quiet-action { min-height: 34px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 9px; text-decoration: none; }
 .quiet-action:hover { color: var(--forest); background: #ebe8df; }
 .role-switcher { position: relative; min-width: 214px; height: 46px; padding: 5px 34px 5px 6px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
 .role-avatar { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 5px 11px 5px 5px; color: white; background: var(--forest-2); font-size: 11px; font-weight: 750; }

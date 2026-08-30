@@ -21,7 +21,9 @@ from .models import (
     LeadStub,
     ManualTask,
     MarketingCase,
+    MarketingCaseChangeRequest,
     MarketingCaseMessage,
+    MarketingChatTurn,
     MarketingDecision,
     MarketingDeliverable,
     MarketingDeliverableRevision,
@@ -32,6 +34,7 @@ from .models import (
     SalesFeedback,
 )
 from .observability import metrics
+from .workspace_ops import append_case_activity, published_profile_bundle
 
 
 STAGES = (
@@ -351,6 +354,7 @@ def case_snapshot(db: Session, case: MarketingCase) -> dict[str, Any]:
         payload = _as_dict(obj) if obj else None
         if isinstance(obj, AgentRun) and payload is not None:
             payload["trace_id"] = _trace_id(obj.traceparent)
+            payload["profile_hash"] = _hash(obj.profile_snapshot) if obj.profile_snapshot else None
         resources.append({**_as_dict(ref), "resource": payload})
     deliverable = db.scalar(select(MarketingDeliverable).where(MarketingDeliverable.case_id == case.id))
     deliverable_history = list(db.scalars(select(MarketingDeliverableRevision).where(
@@ -365,6 +369,12 @@ def case_snapshot(db: Session, case: MarketingCase) -> dict[str, Any]:
     reconciliations = list(db.scalars(select(MarketingReconciliation).where(
         MarketingReconciliation.case_id == case.id,
     ).order_by(MarketingReconciliation.created_at)).all())
+    change_requests = list(db.scalars(select(MarketingCaseChangeRequest).where(
+        MarketingCaseChangeRequest.case_id == case.id,
+    ).order_by(MarketingCaseChangeRequest.created_at)).all())
+    chat_turns = list(db.scalars(select(MarketingChatTurn).where(
+        MarketingChatTurn.case_id == case.id,
+    ).order_by(MarketingChatTurn.created_at)).all())
     return {
         **_as_dict(case),
         "stages": [_as_dict(item) for item in steps],
@@ -374,6 +384,8 @@ def case_snapshot(db: Session, case: MarketingCase) -> dict[str, Any]:
         "messages": [_as_dict(item) for item in messages],
         "decisions": [_as_dict(item) for item in decisions],
         "reconciliations": [_as_dict(item) for item in reconciliations],
+        "change_requests": [_as_dict(item) for item in change_requests],
+        "chat_turns": [_as_dict(item) for item in chat_turns],
         "next_actions": allowed_actions(db, case),
         "boundary": {
             "publishing": "simulated",
@@ -472,11 +484,10 @@ def _start_agent(
     if step.status != "ready":
         raise MarketingCaseConflict(f"阶段{stage_key}当前不能启动：{step.status}")
     role_id, profile_id = ROLE_BY_STAGE[stage_key]
-    profile_config = db.scalar(select(AgentProfileConfig).where(
-        AgentProfileConfig.agent_key == profile_id.upper(),
-    ))
-    profile_version = profile_config.published_version if profile_config else None
-    profile_snapshot = dict(profile_config.config_json) if profile_config else {}
+    try:
+        profile_version, profile_snapshot, _ = published_profile_bundle(db, profile_id)
+    except LookupError as exc:
+        raise MarketingCaseConflict(str(exc)) from exc
     _accept_pending_handoff(db, case, role_id)
     instruction = _instruction(db, case, stage_key)
     commitment_payload = {
@@ -1427,6 +1438,8 @@ def execute_case_command(
             commitment_id=old_run.commitment_id,
             role_id=old_run.role_id,
             profile_id=old_run.profile_id,
+            profile_version=old_run.profile_version,
+            profile_snapshot=dict(old_run.profile_snapshot or {}),
             execution_mode=case.execution_mode,
             case_id=case.id,
             stage_key=step.step_key,
@@ -1589,6 +1602,7 @@ def prepare_synthetic_candidates(db: Session, run: AgentRun, attempt: AgentRunAt
             "execution_mode": "synthetic",
         }
         item = KnowledgeItem(
+            generated_by_run_id=run.id,
             kind=kind,
             title=title,
             body=body,
@@ -1604,7 +1618,106 @@ def prepare_synthetic_candidates(db: Session, run: AgentRun, attempt: AgentRunAt
     return created
 
 
+def _sync_chat_turn_after_run_terminal(db: Session, run: AgentRun) -> None:
+    """Persist the terminal result of a real Agent chat Run exactly once."""
+    turn = db.scalar(select(MarketingChatTurn).where(MarketingChatTurn.run_id == run.id))
+    if not turn or turn.status in {"completed", "failed", "cancelled", "unknown"}:
+        return
+    case = db.get(MarketingCase, turn.case_id)
+    if not case:
+        return
+
+    if run.status == "evidence_accepted":
+        hermes = run.output.get("hermes", {}) if isinstance(run.output, dict) else {}
+        reply = hermes.get("output") if isinstance(hermes, dict) else None
+        if isinstance(reply, (dict, list)):
+            reply = json.dumps(reply, ensure_ascii=False, indent=2)
+        if not isinstance(reply, str) or not reply.strip():
+            turn.status = "failed"
+            turn.failure = {
+                "failure_class": "missing_agent_reply",
+                "retryability": "safe",
+                "run_status": run.status,
+            }
+            append_case_activity(
+                db,
+                case,
+                event_type="chat.failed",
+                actor_id=f"agent:{run.profile_id}",
+                summary=f"{turn.channel} Run完成但没有返回可展示回复",
+                stage_key=turn.stage_key,
+                correlation_id=run.correlation_id,
+                detail=turn.failure,
+                resource_refs=[{"type": "chat_turn", "id": turn.id}, {"type": "run", "id": run.id}],
+            )
+            _touch(case, "chat reply missing")
+            return
+
+        message = MarketingCaseMessage(
+            case_id=turn.case_id,
+            stage_key=turn.stage_key,
+            channel=turn.channel,
+            sender_type="agent",
+            intent="agent_reply",
+            body=reply.strip(),
+            attachments=[{
+                "type": "agent_run",
+                "run_id": run.id,
+                "profile_id": turn.profile_id,
+                "profile_version": turn.profile_version,
+                "execution_mode": turn.execution_mode,
+            }],
+            created_by=f"agent:{run.profile_id}",
+        )
+        db.add(message)
+        db.flush()
+        turn.agent_message_id = message.id
+        turn.status = "completed"
+        turn.failure = {}
+        append_case_activity(
+            db,
+            case,
+            event_type="chat.completed",
+            actor_id=f"agent:{run.profile_id}",
+            summary=f"{turn.channel} 已返回真实 Agent 回复",
+            stage_key=turn.stage_key,
+            correlation_id=run.correlation_id,
+            resource_refs=[
+                {"type": "chat_turn", "id": turn.id},
+                {"type": "message", "id": message.id},
+                {"type": "run", "id": run.id},
+            ],
+        )
+        _touch(case, "chat reply persisted")
+        return
+
+    if run.status in {"failed", "cancelled", "unknown"}:
+        attempt = db.get(AgentRunAttempt, run.current_attempt_id) if run.current_attempt_id else None
+        turn.status = run.status
+        turn.failure = {
+            "failure_class": attempt.failure_class if attempt and attempt.failure_class else f"run_{run.status}",
+            "retryability": attempt.retryability if attempt else "unsafe",
+            "run_status": run.status,
+            "run_failure": run.failure or {},
+        }
+        append_case_activity(
+            db,
+            case,
+            event_type=f"chat.{run.status}",
+            actor_id="runtime-worker",
+            summary=f"{turn.channel} 对话Run进入{run.status}",
+            stage_key=turn.stage_key,
+            correlation_id=run.correlation_id,
+            detail=turn.failure,
+            resource_refs=[{"type": "chat_turn", "id": turn.id}, {"type": "run", "id": run.id}],
+        )
+        _touch(case, f"chat run terminal {run.status}")
+
+
 def sync_case_after_run_terminal(db: Session, run: AgentRun) -> None:
+    if run.purpose == "chat":
+        _sync_chat_turn_after_run_terminal(db, run)
+        return
     step = db.scalar(select(MarketingCaseStep).where(MarketingCaseStep.active_run_id == run.id))
     if not step or step.status not in {"running", "blocked"}:
         return
